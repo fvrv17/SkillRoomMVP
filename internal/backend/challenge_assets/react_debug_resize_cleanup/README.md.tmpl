@@ -1,0 +1,9 @@
+Fix `{{component_name}}` so it updates the viewport status without leaking event listeners.
+
+Requirements:
+- keep the public component API unchanged
+- show `{{desktop_label}}` at or above the breakpoint
+- show `{{mobile_label}}` below the breakpoint
+- do not register duplicate resize listeners
+- clean up listeners on unmount
+

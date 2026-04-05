@@ -1,0 +1,29 @@
+import { describe, expect, it } from "vitest";
+import { createLRUCache } from "../src/cache.js";
+
+describe("createLRUCache", () => {
+  it("evicts the least recently used entry", () => {
+    const cache = createLRUCache(2);
+
+    cache.set("ada", 1).set("grace", 2);
+    cache.get("ada");
+    cache.set("margaret", 3);
+
+    expect(cache.has("ada")).toBe(true);
+    expect(cache.has("grace")).toBe(false);
+    expect(cache.has("margaret")).toBe(true);
+  });
+
+  it("returns entries from most recent to least recent", () => {
+    const cache = createLRUCache(3);
+
+    cache.set("ada", 1).set("grace", 2).set("margaret", 3);
+    cache.get("ada");
+
+    expect(cache.entries()).toEqual([
+      ["ada", 1],
+      ["margaret", 3],
+      ["grace", 2]
+    ]);
+  });
+});

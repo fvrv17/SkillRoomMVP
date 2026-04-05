@@ -1,0 +1,41 @@
+import React from "react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+const dataset = {{candidate_fixture}};
+const candidateSource = {{candidate_source_value}};
+
+describe("{{component_name}} hidden checks", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("trims the query and restores all results when cleared [quality:debounce-reset]", async () => {
+    render(<{{component_name}} {{candidate_source_name}}={candidateSource} delay={{{debounce_ms}}} />);
+    const input = screen.getByLabelText("{{input_label}}");
+
+    fireEvent.change(input, {
+      target: { value: "{{trim_query}}" }
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync({{debounce_ms}});
+    });
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("{{trim_expected}}")).toBeInTheDocument();
+
+    fireEvent.change(input, {
+      target: { value: "" }
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync({{debounce_ms}});
+    });
+
+    expect(screen.getAllByRole("listitem")).toHaveLength({{restored_results_count}});
+  });
+});

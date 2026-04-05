@@ -1,0 +1,16 @@
+import { describe, expect, it } from "vitest";
+import { summarizeCandidates } from "../src/transform.js";
+
+describe("summarizeCandidates hidden checks", () => {
+  it("does not mutate the input collection [quality:immutable-input]", () => {
+    const candidates = [
+      { id: "1", status: "applied", skills: ["react", "typescript"] },
+      { id: "2", status: "interview", skills: ["react"] }
+    ];
+    const original = JSON.parse(JSON.stringify(candidates));
+
+    summarizeCandidates(candidates);
+
+    expect(candidates).toEqual(original);
+  });
+});

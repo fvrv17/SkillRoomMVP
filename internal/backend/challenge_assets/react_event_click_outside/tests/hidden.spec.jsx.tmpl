@@ -1,0 +1,20 @@
+import React from "react";
+import { render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+describe("{{component_name}} hidden checks", () => {
+  it("registers one listener and cleans it up [quality:listener-cleanup]", () => {
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+
+    const { rerender, unmount } = render(<{{component_name}} onClose={() => {}} />);
+    rerender(<{{component_name}} onClose={() => {}} />);
+
+    expect(addSpy.mock.calls.filter(([eventName]) => eventName === "mousedown")).toHaveLength(1);
+
+    unmount();
+
+    expect(removeSpy.mock.calls.filter(([eventName]) => eventName === "mousedown")).toHaveLength(1);
+  });
+});

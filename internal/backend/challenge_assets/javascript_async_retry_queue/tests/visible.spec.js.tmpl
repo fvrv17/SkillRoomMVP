@@ -1,0 +1,28 @@
+import { describe, expect, it, vi } from "vitest";
+import { retryOperation } from "../src/retry.js";
+
+describe("retryOperation", () => {
+  it("retries until the task succeeds", async () => {
+    const task = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("first"))
+      .mockRejectedValueOnce(new Error("second"))
+      .mockResolvedValue("ok");
+
+    await expect(retryOperation(task, { retries: 3 })).resolves.toBe("ok");
+    expect(task).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops when shouldRetry blocks another attempt", async () => {
+    const task = vi.fn().mockRejectedValue(new Error("boom"));
+
+    await expect(
+      retryOperation(task, {
+        retries: 4,
+        shouldRetry: (error, attempt) => attempt < 2 && error.message !== "fatal"
+      })
+    ).rejects.toThrow("boom");
+
+    expect(task).toHaveBeenCalledTimes(2);
+  });
+});

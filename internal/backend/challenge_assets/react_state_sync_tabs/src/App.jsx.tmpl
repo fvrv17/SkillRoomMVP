@@ -1,0 +1,37 @@
+import React, { useEffect, useState } from "react";
+
+export function {{component_name}}({ tabs, activeId, onChange }) {
+  const fallbackId = activeId ?? tabs[0]?.id ?? "";
+  const [currentId, setCurrentId] = useState(fallbackId);
+
+  useEffect(() => {
+    // TODO keep currentId aligned with activeId and available tabs.
+  }, [activeId, tabs]);
+
+  const currentTab = tabs.find((tab) => tab.id === currentId) || tabs[0];
+
+  function handleSelect(nextID) {
+    setCurrentId(nextID);
+    onChange?.(nextID);
+  }
+
+  return (
+    <section>
+      <div role="tablist" aria-label="track tabs">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-pressed={tab.id === currentId}
+            onClick={() => handleSelect(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {currentTab ? <p aria-label="active panel">{currentTab.content}</p> : null}
+    </section>
+  );
+}
+
+export default {{component_name}};

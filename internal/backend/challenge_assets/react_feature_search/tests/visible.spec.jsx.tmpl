@@ -1,0 +1,49 @@
+import React from "react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+const dataset = {{candidate_fixture}};
+const candidateSource = {{candidate_source_value}};
+
+describe("{{component_name}}", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("filters results after the debounce delay", async () => {
+    render(<{{component_name}} {{candidate_source_name}}={candidateSource} delay={{{debounce_ms}}} />);
+
+    fireEvent.change(screen.getByLabelText("{{input_label}}"), {
+      target: { value: "{{match_query}}" }
+    });
+
+    act(() => {
+      vi.advanceTimersByTime({{debounce_ms}} - 1);
+    });
+    expect(screen.queryAllByRole("listitem")).toHaveLength({{initial_results_count}});
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("{{match_expected}}")).toBeInTheDocument();
+  });
+
+  it("renders the empty state when nothing matches", async () => {
+    render(<{{component_name}} {{candidate_source_name}}={candidateSource} delay={{{debounce_ms}}} emptyMessage="{{empty_state}}" />);
+
+    fireEvent.change(screen.getByLabelText("{{input_label}}"), {
+      target: { value: "nobody" }
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync({{debounce_ms}});
+    });
+    expect(screen.getByText("{{empty_state}}")).toBeInTheDocument();
+  });
+});

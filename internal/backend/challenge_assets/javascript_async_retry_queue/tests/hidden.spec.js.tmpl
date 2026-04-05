@@ -1,0 +1,17 @@
+import { describe, expect, it, vi } from "vitest";
+import { retryOperation } from "../src/retry.js";
+
+describe("retryOperation hidden checks", () => {
+  it("reports attempts in order and stops after success [quality:attempt-order]", async () => {
+    const task = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("first"))
+      .mockResolvedValue("ok");
+    const onAttempt = vi.fn();
+
+    await expect(retryOperation(task, { retries: 3, onAttempt })).resolves.toBe("ok");
+
+    expect(onAttempt.mock.calls).toEqual([[1], [2]]);
+    expect(task).toHaveBeenCalledTimes(2);
+  });
+});

@@ -1,0 +1,107 @@
+services:
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+    environment:
+      BACKEND_ORIGIN: http://backend:8080
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000 >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  runner:
+    build:
+      context: ..
+      dockerfile: deploy/runner.Dockerfile
+    environment:
+      RUNNER_ADDR: ":8081"
+      RUNNER_SANDBOX_IMAGE: deploy-runner:latest
+      RUNNER_CPU_LIMIT: "0.50"
+      RUNNER_MEMORY_MB: 256
+      RUNNER_DEFAULT_TIMEOUT: 60s
+    expose:
+      - "8081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mvp
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mvp"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    environment:
+      BACKEND_ADDR: ":8080"
+      AUTH_TOKEN_SECRET: dev-secret
+      AUTH_TOKEN_ISSUER: mvp-platform
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/mvp?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_DB: 0
+      RUNNER_BASE_URL: http://runner:8081
+      RUNNER_TIMEOUT: 90s
+      FRONTEND_REDIRECT_URL: http://localhost:3000
+    ports:
+      - "8080:8080"
+    depends_on:
+      runner:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

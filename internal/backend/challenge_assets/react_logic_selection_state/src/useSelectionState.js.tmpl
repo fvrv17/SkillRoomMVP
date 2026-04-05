@@ -1,0 +1,31 @@
+import { useEffect, useMemo, useState } from "react";
+
+export function {{hook_name}}(items, options = {}) {
+  const {
+    maxSelected = {{max_selected}},
+    disabledIds = [],
+    lockedIds = [],
+    getGroupId = () => null
+  } = options;
+  const [selectedIds, setSelectedIds] = useState([]);
+  const itemIds = useMemo(() => items.map((item) => {{item_id_expr}}), [items]);
+
+  useEffect(() => {
+    // TODO drop stale ids whenever the generated item source changes and preserve valid locked ids.
+  }, [itemIds, lockedIds]);
+
+  return {
+    itemIds,
+    selectedIds,
+    canSelect: () => true,
+    toggle: () => {
+      // TODO block disabled ids, apply getGroupId constraints, and apply the overflow rule:
+      // {{overflow_rule_description}}
+    },
+    clear: () => {
+      setSelectedIds([]);
+    }
+  };
+}
+
+export default {{hook_name}};

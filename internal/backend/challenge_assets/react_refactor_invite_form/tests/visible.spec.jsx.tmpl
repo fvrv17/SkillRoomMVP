@@ -1,0 +1,40 @@
+import React from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import InviteForm from "../src/App.jsx";
+
+describe("InviteForm", () => {
+  it("submits a normalized payload", () => {
+    const onSubmit = vi.fn();
+    render(<InviteForm onSubmit={onSubmit} {{allowed_input_prop}} />);
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "  Alex Smith " }
+    });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "  Alex@{{allowed_domain_without_at}}  " }
+    });
+    fireEvent.change(screen.getByLabelText("Role"), {
+      target: { value: "reviewer" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send invite" }));
+
+    expect(onSubmit).toHaveBeenCalledWith({{submit_expected_payload}});
+  });
+
+  it("renders a validation error for the wrong domain", () => {
+    const onSubmit = vi.fn();
+    render(<InviteForm onSubmit={onSubmit} {{allowed_input_prop}} />);
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Alex Smith" }
+    });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "alex@example.com" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send invite" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("{{domain_error_message}}");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});

@@ -1,0 +1,24 @@
+import React from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+describe("{{component_name}}", () => {
+  it("does not close for inside clicks", () => {
+    const onClose = vi.fn();
+    render(<{{component_name}} onClose={onClose} />);
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Keep open" }));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes for outside clicks", () => {
+    const onClose = vi.fn();
+    render(<{{component_name}} onClose={onClose} />);
+
+    fireEvent.mouseDown(document.body);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});

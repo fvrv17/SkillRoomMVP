@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: mvp-platform
+data:
+  BACKEND_ADDR: ":8080"
+  AUTH_TOKEN_ISSUER: "mvp-platform"
+  REDIS_ADDR: "redis:6379"
+  REDIS_DB: "0"
+  RUNNER_BASE_URL: "http://runner"
+  BACKEND_READ_TIMEOUT: "10s"
+  BACKEND_WRITE_TIMEOUT: "30s"
+  BACKEND_IDLE_TIMEOUT: "60s"
+  BACKEND_SHUTDOWN_TIMEOUT: "10s"

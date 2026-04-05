@@ -1,0 +1,29 @@
+import React from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+const tabs = [
+  { id: "debug", label: "Debug", content: "Trace a lifecycle bug" },
+  { id: "feature", label: "Feature", content: "Ship a new interaction" },
+  { id: "perf", label: "Performance", content: "Reduce runtime cost" }
+];
+
+describe("{{component_name}}", () => {
+  it("selects a tab locally and reports user changes", () => {
+    const onChange = vi.fn();
+    render(<{{component_name}} tabs={tabs} activeId="debug" onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Feature" }));
+
+    expect(screen.getByLabelText("active panel")).toHaveTextContent("Ship a new interaction");
+    expect(onChange).toHaveBeenCalledWith("feature");
+  });
+
+  it("syncs with a new activeId from the parent", () => {
+    const { rerender } = render(<{{component_name}} tabs={tabs} activeId="debug" />);
+    rerender(<{{component_name}} tabs={tabs} activeId="perf" />);
+
+    expect(screen.getByLabelText("active panel")).toHaveTextContent("Reduce runtime cost");
+  });
+});

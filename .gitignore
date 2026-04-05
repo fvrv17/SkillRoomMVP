@@ -1,0 +1,11 @@
+.build/
+.gocache/
+.swift-module-cache/
+.next/
+node_modules/
+coverage/
+dist/
+tmp/
+*.log
+.DS_Store
+

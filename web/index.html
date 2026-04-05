@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Signal Room</title>
+    <link rel="stylesheet" href="/styles.css?v=auth-preview-3" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <div class="grain"></div>
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Signal Room</h1>
+          <p class="tagline">React skill evaluation with a visual room, anti-cheat telemetry, and recruiter review.</p>
+        </div>
+        <div class="session-chip" id="session-chip">
+          <span id="session-label">Signed out</span>
+          <button class="ghost" id="logout-button" type="button" hidden>Log out</button>
+        </div>
+      </header>
+
+      <div class="notice" id="flash"></div>
+
+      <main class="layout">
+        <section class="auth-panel" id="auth-panel">
+          <div class="auth-shell">
+            <aside class="auth-visual">
+              <div class="auth-visual-top">
+                <div class="auth-brand-mark">Signal Room</div>
+                <button class="ghost auth-preview-link" id="explore-demo-top" type="button">Explore demo</button>
+              </div>
+
+              <div class="auth-scene-panel">
+                <div class="auth-region-controls">
+                  <div>
+                    <span class="auth-room-label">Region</span>
+                    <strong class="auth-region-heading">Select a launch scene</strong>
+                  </div>
+                  <div class="auth-region-switch" role="tablist" aria-label="Region selector">
+                    <button class="auth-region-button active" data-region="americas" type="button">Americas</button>
+                    <button class="auth-region-button" data-region="europe" type="button">Europe</button>
+                    <button class="auth-region-button" data-region="mena" type="button">MENA</button>
+                    <button class="auth-region-button" data-region="apac" type="button">APAC</button>
+                  </div>
+                </div>
+
+                <div class="auth-scene" id="auth-scene" data-region="americas">
+                  <span class="auth-scene-pill" id="auth-scene-badge">Americas room</span>
+                  <span class="auth-scene-status">live preview</span>
+
+                  <div class="scene-window">
+                    <div class="scene-window-frame"></div>
+                    <div class="scene-window-view">
+                      <span class="scene-sun"></span>
+                      <span class="scene-horizon"></span>
+                    </div>
+                  </div>
+
+                  <div class="scene-poster">
+                    <span class="scene-poster-art"></span>
+                  </div>
+                  <div class="scene-clock"></div>
+                  <div class="scene-shelf">
+                    <span class="scene-shelf-book scene-shelf-book-a"></span>
+                    <span class="scene-shelf-book scene-shelf-book-b"></span>
+                    <span class="scene-shelf-lamp"></span>
+                    <span class="scene-shelf-note"></span>
+                  </div>
+                  <div class="scene-console">
+                    <span class="scene-console-cube scene-console-cube-a"></span>
+                    <span class="scene-console-cube scene-console-cube-b"></span>
+                    <span class="scene-console-cube scene-console-cube-c"></span>
+                  </div>
+                  <div class="scene-desk">
+                    <span class="scene-monitor"></span>
+                    <span class="scene-keyboard"></span>
+                    <span class="scene-mug"></span>
+                    <span class="scene-lamp-base"></span>
+                  </div>
+                  <div class="scene-chair"></div>
+                  <div class="scene-plant">
+                    <span class="scene-plant-pot"></span>
+                    <span class="scene-plant-leaf scene-plant-leaf-a"></span>
+                    <span class="scene-plant-leaf scene-plant-leaf-b"></span>
+                    <span class="scene-plant-leaf scene-plant-leaf-c"></span>
+                  </div>
+                  <div class="scene-rug"></div>
+                  <div class="scene-floor-line"></div>
+                </div>
+              </div>
+
+              <div class="auth-visual-copy">
+                <h2>Walk into a room that proves skill.</h2>
+                <p id="auth-region-copy">Browse the challenge bank, recruiter desk, rankings, and chat flows from the Americas launch room before creating an account.</p>
+                <div class="auth-feature-strip">
+                  <span>Visual room</span>
+                  <span>Rankings</span>
+                  <span>Challenge room</span>
+                  <span>Recruiter desk</span>
+                </div>
+              </div>
+            </aside>
+
+            <div class="auth-stage">
+              <div class="auth-tabs" role="tablist" aria-label="Authentication views">
+                <button class="auth-tab active" data-auth-view="register" type="button">Create account</button>
+                <button class="auth-tab" data-auth-view="login" type="button">Log in</button>
+              </div>
+
+              <div class="auth-intro">
+                <h2 id="auth-title">Create an account</h2>
+                <p id="auth-copy">Build your room, prove your React skills, and unlock recruiter review.</p>
+              </div>
+
+              <form class="auth-form" id="register-form">
+                <div class="auth-form-row">
+                  <label>
+                    Username
+                    <input id="register-username" name="username" type="text" placeholder="fletcher" required />
+                  </label>
+                  <label>
+                    Country
+                    <input id="register-country" name="country" type="text" maxlength="2" value="US" required />
+                  </label>
+                </div>
+                <label>
+                  Email
+                  <input id="register-email" name="email" type="email" placeholder="name@example.com" required />
+                </label>
+                <label>
+                  Password
+                  <input id="register-password" name="password" type="password" placeholder="Create a password" required />
+                </label>
+                <label>
+                  Role
+                  <select id="register-role" name="role">
+                    <option value="user">Candidate</option>
+                    <option value="hr">Recruiter</option>
+                  </select>
+                </label>
+                <button class="primary auth-submit" type="submit">Create account</button>
+                <p class="auth-inline-copy">
+                  Already have an account?
+                  <button class="auth-inline-link" data-auth-view="login" type="button">Log in</button>
+                </p>
+              </form>
+
+              <form class="auth-form hidden" id="login-form">
+                <label>
+                  Email
+                  <input id="login-email" name="email" type="email" placeholder="name@example.com" required />
+                </label>
+                <label>
+                  Password
+                  <input id="login-password" name="password" type="password" placeholder="Enter your password" required />
+                </label>
+                <button class="primary auth-submit" type="submit">Sign in</button>
+                <p class="auth-inline-copy">
+                  Need an account?
+                  <button class="auth-inline-link" data-auth-view="register" type="button">Create one</button>
+                </p>
+              </form>
+
+              <div class="auth-divider"><span>or enter in preview mode</span></div>
+              <button class="ghost auth-demo-button" id="explore-demo" type="button">Explore product preview</button>
+              <p class="auth-footnote">Preview mode unlocks every screen with demo data, so you can inspect the product before signing in.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="workspace hidden" id="workspace">
+          <aside class="rail panel">
+            <div class="rail-profile">
+              <p class="eyebrow">Active profile</p>
+              <h2 id="user-name">-</h2>
+              <p id="user-meta" class="subtle"></p>
+            </div>
+
+            <nav class="rail-nav">
+              <button class="rail-link active" data-screen="overview" type="button">Overview</button>
+              <button class="rail-link" data-screen="challenge" type="button">Challenge Room</button>
+              <button class="rail-link" data-screen="social" type="button">Social + Chat</button>
+              <button class="rail-link hidden" data-screen="hr" id="hr-nav-link" type="button">Recruiter Desk</button>
+            </nav>
+
+            <div class="rail-stats card">
+              <p class="eyebrow">Live score</p>
+              <div class="score-row">
+                <span id="profile-score">0</span>
+                <small id="profile-percentile">0 percentile</small>
+              </div>
+              <div class="metric-grid compact">
+                <div>
+                  <span>Confidence</span>
+                  <strong id="profile-confidence">0</strong>
+                </div>
+                <div>
+                  <span>Completed</span>
+                  <strong id="profile-completed">0</strong>
+                </div>
+                <div>
+                  <span>Streak</span>
+                  <strong id="profile-streak">0</strong>
+                </div>
+                <div>
+                  <span>Track</span>
+                  <strong id="profile-track">React</strong>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <section class="stage">
+            <section class="screen active" id="screen-overview">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Visual Room</p>
+                  <h2>Your current signal</h2>
+                </div>
+                <button class="ghost" id="refresh-overview" type="button">Refresh data</button>
+              </div>
+
+              <div class="hero-grid">
+                <article class="panel room-panel">
+                  <div class="room-head">
+                    <div>
+                      <p class="eyebrow">Room state</p>
+                      <h3>Visual room</h3>
+                    </div>
+                    <span class="status-pill" id="room-status">No activity yet</span>
+                  </div>
+                  <div class="room-stage" id="room-stage"></div>
+                </article>
+
+                <article class="panel summary-panel">
+                  <div class="panel-header tight">
+                    <div>
+                      <p class="eyebrow">Ranking snapshot</p>
+                      <h3>Where you stand</h3>
+                    </div>
+                  </div>
+                  <div class="metric-grid">
+                    <div>
+                      <span>Global percentile</span>
+                      <strong id="overview-global">0</strong>
+                    </div>
+                    <div>
+                      <span>Country percentile</span>
+                      <strong id="overview-country">0</strong>
+                    </div>
+                    <div>
+                      <span>Country</span>
+                      <strong id="overview-country-code">US</strong>
+                    </div>
+                    <div>
+                      <span>Role</span>
+                      <strong id="overview-role">Candidate</strong>
+                    </div>
+                  </div>
+                  <div class="skills-list card inset" id="skills-list"></div>
+                </article>
+              </div>
+
+              <article class="panel">
+                <div class="panel-header tight">
+                  <div>
+                    <p class="eyebrow">Leaderboard</p>
+                    <h3>Global ranking</h3>
+                  </div>
+                  <button class="ghost" id="refresh-rankings" type="button">Reload rankings</button>
+                </div>
+                <div class="table-wrap">
+                  <table class="rankings-table">
+                    <thead>
+                      <tr>
+                        <th>Rank</th>
+                        <th>User</th>
+                        <th>Country</th>
+                        <th>Score</th>
+                        <th>Confidence</th>
+                        <th>User ID</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rankings-body"></tbody>
+                  </table>
+                </div>
+              </article>
+            </section>
+
+            <section class="screen" id="screen-challenge">
+              <div class="challenge-grid">
+                <article class="panel">
+                  <div class="panel-header tight">
+                    <div>
+                      <p class="eyebrow">Challenge bank</p>
+                      <h2>Start a seeded task</h2>
+                    </div>
+                    <button class="ghost" id="refresh-templates" type="button">Reload tasks</button>
+                  </div>
+                  <div class="template-list" id="template-list"></div>
+                </article>
+
+                <article class="panel challenge-panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="eyebrow">Current room</p>
+                      <h2 id="challenge-title">No challenge selected</h2>
+                    </div>
+                    <div class="challenge-actions">
+                      <button class="ghost" id="run-checks" type="button">Run checks</button>
+                      <button class="ghost" id="request-hint" type="button">AI hint</button>
+                      <button class="ghost" id="request-explanation" type="button">Explain result</button>
+                      <button class="primary" id="submit-solution" type="button">Submit solution</button>
+                    </div>
+                  </div>
+
+                  <div class="challenge-meta" id="challenge-meta"></div>
+                  <div class="challenge-description card inset" id="challenge-description"></div>
+
+                  <div class="file-tabs" id="file-tabs"></div>
+                  <label class="editor-wrap">
+                    <span class="hidden-accessible">Challenge editor</span>
+                    <textarea id="editor" spellcheck="false" placeholder="Start a challenge to load files."></textarea>
+                  </label>
+
+                  <div class="panel-row">
+                    <div class="card inset ai-card">
+                      <div class="card-head small">
+                        <h3>AI support</h3>
+                        <p>Hints are capped per challenge.</p>
+                      </div>
+                      <label>
+                        Focus area
+                        <input id="hint-focus" type="text" placeholder="render stability, filtering, state model" />
+                      </label>
+                      <label>
+                        Question
+                        <input id="hint-question" type="text" placeholder="What should I verify first?" />
+                      </label>
+                      <div id="hint-stream" class="hint-stream empty-state">No hints requested yet.</div>
+                    </div>
+
+                    <div class="card inset results-card">
+                      <div class="card-head small">
+                        <h3>Evaluation</h3>
+                        <p>Server-owned scoring and suspicion flags.</p>
+                      </div>
+                      <div class="metric-grid" id="evaluation-grid"></div>
+                      <div class="explanation-box" id="explanation-box">Submit a solution to generate a structured explanation.</div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section class="screen" id="screen-social">
+              <div class="social-grid">
+                <article class="panel">
+                  <div class="panel-header tight">
+                    <div>
+                      <p class="eyebrow">Friend graph</p>
+                      <h2>Recruiter and peer interaction</h2>
+                    </div>
+                  </div>
+                  <div class="form-grid">
+                    <form class="card inset" id="friend-request-form">
+                      <div class="card-head small">
+                        <h3>Send request</h3>
+                        <p>Use a user ID from the ranking board.</p>
+                      </div>
+                      <label>
+                        Peer user ID
+                        <input id="friend-request-user-id" type="text" required />
+                      </label>
+                      <button class="primary" type="submit">Request friend</button>
+                    </form>
+
+                    <form class="card inset" id="friend-accept-form">
+                      <div class="card-head small">
+                        <h3>Accept request</h3>
+                        <p>Use the requester user ID.</p>
+                      </div>
+                      <label>
+                        Requester user ID
+                        <input id="friend-accept-user-id" type="text" required />
+                      </label>
+                      <button class="primary" type="submit">Accept friend</button>
+                    </form>
+                  </div>
+                </article>
+
+                <article class="panel">
+                  <div class="panel-header tight">
+                    <div>
+                      <p class="eyebrow">Direct chat</p>
+                      <h2>Message a friend</h2>
+                    </div>
+                    <button class="ghost" id="refresh-chat" type="button">Refresh chat</button>
+                  </div>
+                  <div class="chat-head">
+                    <label>
+                      Peer user ID
+                      <input id="chat-peer-id" type="text" placeholder="Paste an accepted friend user ID" />
+                    </label>
+                  </div>
+                  <div class="chat-log" id="chat-log">Chat is empty.</div>
+                  <form class="chat-form" id="chat-form">
+                    <textarea id="chat-message" placeholder="Write a direct message to a friend."></textarea>
+                    <button class="primary" type="submit">Send message</button>
+                  </form>
+                </article>
+              </div>
+            </section>
+
+            <section class="screen hidden" id="screen-hr">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Recruiter desk</p>
+                  <h2>Review, create, shortlist</h2>
+                </div>
+                <button class="ghost" id="refresh-candidates" type="button">Refresh candidates</button>
+              </div>
+
+              <div class="hr-grid">
+                <article class="panel">
+                  <div class="card-head">
+                    <h3>Candidate search</h3>
+                    <p>Filter by score and recency.</p>
+                  </div>
+                  <form class="form-grid inline" id="candidate-search-form">
+                    <label>
+                      Minimum score
+                      <input id="candidate-min-score" type="number" value="20" min="0" />
+                    </label>
+                    <label>
+                      Top percent
+                      <input id="candidate-top-percent" type="number" value="100" min="1" max="100" />
+                    </label>
+                    <label>
+                      Active days
+                      <input id="candidate-active-days" type="number" value="14" min="1" />
+                    </label>
+                    <button class="primary" type="submit">Search</button>
+                  </form>
+                  <div class="table-wrap">
+                    <table class="rankings-table">
+                      <thead>
+                        <tr>
+                          <th>User</th>
+                          <th>Country</th>
+                          <th>Score</th>
+                          <th>Confidence</th>
+                          <th>User ID</th>
+                        </tr>
+                      </thead>
+                      <tbody id="candidates-body"></tbody>
+                    </table>
+                  </div>
+                </article>
+
+                <article class="panel">
+                  <div class="form-stack">
+                    <form class="card inset" id="company-form">
+                      <div class="card-head small">
+                        <h3>Create company</h3>
+                        <p>Establish a recruiter workspace.</p>
+                      </div>
+                      <label>
+                        Company name
+                        <input id="company-name" type="text" required />
+                      </label>
+                      <label>
+                        Description
+                        <textarea id="company-description"></textarea>
+                      </label>
+                      <button class="primary" type="submit">Create company</button>
+                    </form>
+
+                    <form class="card inset" id="job-form">
+                      <div class="card-head small">
+                        <h3>Create job</h3>
+                        <p>Attach to a company ID you own.</p>
+                      </div>
+                      <label>
+                        Company ID
+                        <input id="job-company-id" type="text" required />
+                      </label>
+                      <label>
+                        Title
+                        <input id="job-title" type="text" required />
+                      </label>
+                      <label>
+                        Description
+                        <textarea id="job-description"></textarea>
+                      </label>
+                      <label>
+                        Required score
+                        <input id="job-required-score" type="number" value="50" min="0" />
+                      </label>
+                      <button class="primary" type="submit">Create job</button>
+                    </form>
+
+                    <form class="card inset" id="shortlist-form">
+                      <div class="card-head small">
+                        <h3>Shortlist candidate</h3>
+                        <p>Store a recruiting decision against a company.</p>
+                      </div>
+                      <label>
+                        Company ID
+                        <input id="shortlist-company-id" type="text" required />
+                      </label>
+                      <label>
+                        Candidate user ID
+                        <input id="shortlist-user-id" type="text" required />
+                      </label>
+                      <label>
+                        Status
+                        <input id="shortlist-status" type="text" value="new" />
+                      </label>
+                      <label>
+                        Notes
+                        <textarea id="shortlist-notes"></textarea>
+                      </label>
+                      <button class="primary" type="submit">Save shortlist</button>
+                    </form>
+                  </div>
+                </article>
+              </div>
+
+              <article class="panel">
+                <div class="panel-header tight">
+                  <div>
+                    <p class="eyebrow">AI support</p>
+                    <h3>Mutation preview for reviewers</h3>
+                  </div>
+                </div>
+                <form class="form-grid inline" id="mutation-preview-form">
+                  <label>
+                    Template ID
+                    <input id="mutation-template-id" type="text" value="react_feature_search" required />
+                  </label>
+                  <label>
+                    Seed
+                    <input id="mutation-seed" type="number" value="2025" />
+                  </label>
+                  <button class="primary" type="submit">Preview mutation</button>
+                </form>
+                <div class="mutation-preview" id="mutation-preview">No preview requested yet.</div>
+              </article>
+            </section>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js?v=auth-preview-3" defer></script>
+  </body>
+</html>

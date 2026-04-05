@@ -1,0 +1,44 @@
+import React from "react";
+import { act, render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
+describe("{{component_name}} hidden checks", () => {
+  it("ignores stale responses when the team changes [quality:stale-response]", async () => {
+    const designRequest = deferred();
+    const frontendRequest = deferred();
+
+    const loadMembers = (teamId) => {
+      if (teamId === "design") {
+        return designRequest.promise;
+      }
+      return frontendRequest.promise;
+    };
+
+    const { rerender } = render(<{{component_name}} teamId="design" loadMembers={loadMembers} />);
+    rerender(<{{component_name}} teamId="frontend" loadMembers={loadMembers} />);
+
+    await act(async () => {
+      frontendRequest.resolve([{ id: "grace", name: "Grace" }]);
+      await frontendRequest.promise;
+    });
+
+    await act(async () => {
+      designRequest.resolve([{ id: "ada", name: "Ada" }]);
+      await designRequest.promise;
+    });
+
+    expect(screen.getByText("Grace")).toBeInTheDocument();
+    expect(screen.queryByText("Ada")).not.toBeInTheDocument();
+  });
+});

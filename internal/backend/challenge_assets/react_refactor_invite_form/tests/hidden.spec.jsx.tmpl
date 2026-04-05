@@ -1,0 +1,23 @@
+import { describe, expect, it } from "vitest";
+import { buildInvitePayload, createInviteValidator } from "../src/App.jsx";
+
+describe("InviteForm hidden checks", () => {
+  it("exposes helper functions with the expected behavior [quality:helper-contract]", () => {
+    const validateInvite = createInviteValidator({{validator_input_value}});
+
+    expect(validateInvite("A", "alex@{{allowed_domain_without_at}}")).toEqual({
+      valid: false,
+      message: "Enter a full name"
+    });
+    expect(validateInvite("Alex Smith", "alex@example.com")).toEqual({
+      valid: false,
+      message: "{{domain_error_message}}"
+    });
+    expect(validateInvite("Alex Smith", "alex@{{allowed_domain_without_at}}")).toEqual({
+      valid: true,
+      message: ""
+    });
+
+    expect(buildInvitePayload("  Alex Smith ", "  Alex@{{allowed_domain_without_at}}  ", "member")).toEqual({{helper_expected_payload}});
+  });
+});

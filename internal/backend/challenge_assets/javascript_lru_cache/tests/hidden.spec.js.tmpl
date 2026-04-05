@@ -1,0 +1,17 @@
+import { describe, expect, it } from "vitest";
+import { createLRUCache } from "../src/cache.js";
+
+describe("createLRUCache hidden checks", () => {
+  it("returns a defensive copy from entries [quality:entries-copy]", () => {
+    const cache = createLRUCache(2);
+    cache.set("ada", 1).set("grace", 2);
+
+    const entries = cache.entries();
+    entries.push(["margaret", 3]);
+
+    expect(cache.entries()).toEqual([
+      ["grace", 2],
+      ["ada", 1]
+    ]);
+  });
+});

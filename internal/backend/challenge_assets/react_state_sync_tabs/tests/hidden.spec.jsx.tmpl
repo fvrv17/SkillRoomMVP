@@ -1,0 +1,27 @@
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+const tabs = [
+  { id: "debug", label: "Debug", content: "Trace a lifecycle bug" },
+  { id: "feature", label: "Feature", content: "Ship a new interaction" }
+];
+
+describe("{{component_name}} hidden checks", () => {
+  it("falls back when the active tab disappears without emitting onChange [quality:prop-sync]", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<{{component_name}} tabs={tabs} activeId="feature" onChange={onChange} />);
+
+    rerender(
+      <{{component_name}}
+        tabs={[{ id: "debug", label: "Debug", content: "Trace a lifecycle bug" }]}
+        activeId="feature"
+        onChange={onChange}
+      />
+    );
+
+    expect(screen.getByLabelText("active panel")).toHaveTextContent("Trace a lifecycle bug");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});

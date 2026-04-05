@@ -1,0 +1,893 @@
+openapi: 3.1.0
+info:
+  title: SkillRoom API
+  version: 0.1.0
+  description: |
+    SkillRoom exposes a Go modular monolith API for auth, challenge lifecycle,
+    execution previews, scored submissions, rankings, and HR review.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Auth
+  - name: Profile
+  - name: Challenges
+  - name: Rankings
+  - name: HR
+paths:
+  /v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              email: candidate@example.com
+              username: candidate-one
+              password: Passw0rd!
+              role: user
+              country: US
+      responses:
+        '201':
+          description: Auth tokens for the newly registered user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Auth tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh an access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: Refreshed auth tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+  /v1/profile:
+    get:
+      tags: [Profile]
+      security:
+        - BearerAuth: []
+      summary: Get the current user profile
+      responses:
+        '200':
+          description: Profile with score and confidence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                user_id: usr_123
+                selected_track: react
+                current_skill_score: 612.4
+                percentile_global: 89
+                percentile_country: 83
+                streak_days: 3
+                confidence_score: 78
+                confidence_level: medium
+                confidence_reasons:
+                  - Multiple completed tasks make the score more stable.
+                completed_challenges: 8
+                updated_at: '2025-01-16T12:00:00Z'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/room:
+    get:
+      tags: [Profile]
+      security:
+        - BearerAuth: []
+      summary: Get the current user room state
+      responses:
+        '200':
+          description: Room items mapped from current skill levels
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomResponse'
+              example:
+                items:
+                  - room_item_code: monitor
+                    current_level: silver
+                    current_variant: monitor-silver
+                    state_json:
+                      skill: react
+                      explanation: React score unlocked a silver monitor tier.
+                  - room_item_code: chair
+                    current_level: bronze
+                    current_variant: chair-bronze
+                    state_json:
+                      skill: architecture
+                      explanation: Architecture score currently maps to the starter chair tier.
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/challenges/templates:
+    get:
+      tags: [Challenges]
+      security:
+        - BearerAuth: []
+      summary: List challenge templates
+      parameters:
+        - in: query
+          name: category
+          schema:
+            type: string
+          description: Optional category filter
+      responses:
+        '200':
+          description: Challenge catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  templates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChallengeTemplate'
+  /v1/challenges/instances:
+    post:
+      tags: [Challenges]
+      security:
+        - BearerAuth: []
+      summary: Start a challenge instance
+      description: Product-level equivalent of starting `/challenges/{id}/start`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartChallengeRequest'
+            example:
+              template_id: react_debug_resize_cleanup
+      responses:
+        '201':
+          description: Generated challenge instance and variant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeInstanceView'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/challenges/instances/{instanceID}:
+    get:
+      tags: [Challenges]
+      security:
+        - BearerAuth: []
+      summary: Fetch a running challenge instance
+      parameters:
+        - $ref: '#/components/parameters/InstanceID'
+      responses:
+        '200':
+          description: Challenge instance view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeInstanceView'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/challenges/instances/{instanceID}/runs:
+    post:
+      tags: [Challenges]
+      security:
+        - BearerAuth: []
+      summary: Execute a preview run in the runner
+      parameters:
+        - $ref: '#/components/parameters/InstanceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitChallengeRequest'
+      responses:
+        '200':
+          description: Preview execution report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunPreviewResponse'
+              example:
+                status: completed
+                instance_id: chg_123
+                template_id: react_debug_resize_cleanup
+                execution:
+                  tests_passed: 2
+                  tests_total: 4
+                  quality_passed: 1
+                  quality_failed: 0
+                  lint_errors: 0
+                  lint_warnings: 1
+                  execution_cost_ms: 38
+                  execution_time_ms: 38
+                  errors: []
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/challenges/instances/{instanceID}/submissions:
+    post:
+      tags: [Challenges]
+      security:
+        - BearerAuth: []
+      summary: Submit a solution for scoring
+      parameters:
+        - $ref: '#/components/parameters/InstanceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitChallengeRequest'
+            example:
+              language: jsx
+              source_files:
+                src/App.jsx: |
+                  export default function App() {
+                    return null;
+                  }
+      responses:
+        '201':
+          description: Submission, execution report, evaluation, and updated profile state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionResponse'
+              example:
+                template_id: react_debug_resize_cleanup
+                instance_id: chg_123
+                execution:
+                  tests_passed: 4
+                  tests_total: 4
+                  quality_passed: 1
+                  quality_failed: 0
+                  execution_cost_ms: 34
+                  execution_time_ms: 34
+                evaluation:
+                  final_score: 88.4
+                  test_score: 100
+                  quality_score: 85
+                  execution_cost_score: 100
+                  speed_score: 100
+                  consistency_score: 57
+                  report_json:
+                    lint_quality: 85
+                    task_quality: 100
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/rankings/global:
+    get:
+      tags: [Rankings]
+      security:
+        - BearerAuth: []
+      summary: Fetch the global ranking
+      responses:
+        '200':
+          description: Ranked candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rankings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RankingEntry'
+  /v1/hr/candidates:
+    get:
+      tags: [HR]
+      security:
+        - BearerAuth: []
+      summary: Search candidate cards for recruiters
+      parameters:
+        - in: query
+          name: min_score
+          schema:
+            type: number
+        - in: query
+          name: min_confidence
+          schema:
+            type: number
+        - in: query
+          name: top_percent
+          schema:
+            type: number
+        - in: query
+          name: active_days
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Candidate cards with trust context
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CandidateView'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    InstanceID:
+      in: path
+      name: instanceID
+      required: true
+      schema:
+        type: string
+  responses:
+    ErrorResponse:
+      description: Error payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      additionalProperties: true
+    RegisterRequest:
+      type: object
+      required: [email, username, password]
+      properties:
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+          enum: [user, hr, admin]
+        country:
+          type: string
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+        country:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_active_at:
+          type: string
+          format: date-time
+        profile:
+          $ref: '#/components/schemas/UserProfile'
+    UserProfile:
+      type: object
+      properties:
+        user_id:
+          type: string
+        selected_track:
+          type: string
+        current_skill_score:
+          type: number
+        percentile_global:
+          type: number
+        percentile_country:
+          type: number
+        streak_days:
+          type: integer
+        confidence_score:
+          type: number
+        confidence_level:
+          type: string
+        confidence_reasons:
+          type: array
+          items:
+            type: string
+        completed_challenges:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: true
+    ChallengeTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        title:
+          type: string
+        difficulty:
+          type: integer
+        description_md:
+          type: string
+        category:
+          type: string
+        track:
+          type: string
+        editable_files:
+          type: array
+          items:
+            type: string
+        evaluation_config_json:
+          $ref: '#/components/schemas/EvaluationConfig'
+        skill_weights:
+          type: object
+          additionalProperties:
+            type: number
+    EvaluationConfig:
+      type: object
+      properties:
+        median_solve_seconds:
+          type: integer
+        median_exec_ms:
+          type: integer
+        max_attempts:
+          type: integer
+        timeout_ms:
+          type: integer
+        memory_mb:
+          type: integer
+        lint_quality_weight:
+          type: number
+        task_quality_weight:
+          type: number
+        quality_check_ids:
+          type: array
+          items:
+            type: string
+    StartChallengeRequest:
+      type: object
+      properties:
+        template_id:
+          type: string
+        category:
+          type: string
+    ChallengeInstance:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        template_id:
+          type: string
+        variant_id:
+          type: string
+        category:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        attempt_number:
+          type: integer
+        visible_files:
+          type: object
+          additionalProperties:
+            type: string
+    ChallengeVariant:
+      type: object
+      properties:
+        id:
+          type: string
+        template_id:
+          type: string
+        variant_hash:
+          type: string
+        seed:
+          type: integer
+        params_json:
+          type: object
+          additionalProperties: true
+        generated_files:
+          type: object
+          additionalProperties:
+            type: string
+        visible_tests:
+          type: object
+          additionalProperties:
+            type: string
+        editable_files:
+          type: array
+          items:
+            type: string
+    ChallengeInstanceView:
+      type: object
+      properties:
+        instance:
+          $ref: '#/components/schemas/ChallengeInstance'
+        template_id:
+          type: string
+        title:
+          type: string
+        description_md:
+          type: string
+        category:
+          type: string
+        difficulty:
+          type: integer
+        visible_tests:
+          type: object
+          additionalProperties:
+            type: string
+        editable_files:
+          type: array
+          items:
+            type: string
+        variant:
+          $ref: '#/components/schemas/ChallengeVariant'
+    SubmitChallengeRequest:
+      type: object
+      required: [language]
+      properties:
+        language:
+          type: string
+        raw_code_text:
+          type: string
+        source_files:
+          type: object
+          additionalProperties:
+            type: string
+    RunnerCheck:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        hidden:
+          type: boolean
+        passed:
+          type: boolean
+    RunnerReport:
+      type: object
+      properties:
+        tests_passed:
+          type: integer
+        tests_total:
+          type: integer
+        hidden_passed:
+          type: integer
+        hidden_failed:
+          type: integer
+        quality_passed:
+          type: integer
+        quality_failed:
+          type: integer
+        lint_errors:
+          type: integer
+        lint_warnings:
+          type: integer
+        execution_cost_ms:
+          type: integer
+          description: Primary runtime cost metric used for scoring and normalized per challenge baseline.
+        execution_time_ms:
+          type: integer
+          description: Legacy alias for execution_cost_ms retained for compatibility with older clients.
+        solve_time_seconds:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunnerCheck'
+    TelemetrySummary:
+      type: object
+      properties:
+        time_to_first_input_seconds:
+          type: integer
+        input_events:
+          type: integer
+        paste_events:
+          type: integer
+        focus_loss_events:
+          type: integer
+        snapshot_events:
+          type: integer
+        last_event_at:
+          type: string
+          format: date-time
+    RunPreviewResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        instance_id:
+          type: string
+        template_id:
+          type: string
+        execution:
+          $ref: '#/components/schemas/RunnerReport'
+        telemetry:
+          $ref: '#/components/schemas/TelemetrySummary'
+        submitted_files:
+          type: object
+          additionalProperties:
+            type: string
+        source_text:
+          type: string
+    Submission:
+      type: object
+      properties:
+        id:
+          type: string
+        challenge_instance_id:
+          type: string
+        submitted_at:
+          type: string
+          format: date-time
+        raw_code_text:
+          type: string
+        source_files:
+          type: object
+          additionalProperties:
+            type: string
+        language:
+          type: string
+        execution_status:
+          type: string
+    EvaluationResult:
+      type: object
+      properties:
+        id:
+          type: string
+        submission_id:
+          type: string
+        test_score:
+          type: number
+        lint_score:
+          type: number
+        quality_score:
+          type: number
+        execution_cost_score:
+          type: number
+          description: Runtime efficiency score derived from execution cost rather than candidate solve time.
+        speed_score:
+          type: number
+          deprecated: true
+          description: Backward-compatible alias for execution_cost_score.
+        consistency_score:
+          type: number
+        final_score:
+          type: number
+        report_json:
+          type: object
+          additionalProperties: true
+    AntiCheatAssessment:
+      type: object
+      properties:
+        level:
+          type: string
+        score:
+          type: integer
+        reasons:
+          type: array
+          items:
+            type: string
+        similarity_score:
+          type: number
+        signals:
+          $ref: '#/components/schemas/TelemetrySummary'
+    UserSkill:
+      type: object
+      properties:
+        skill_code:
+          type: string
+        score:
+          type: number
+        confidence:
+          type: number
+        level:
+          type: string
+      additionalProperties: true
+    RoomItemView:
+      type: object
+      properties:
+        room_item_code:
+          type: string
+        current_level:
+          type: string
+        current_variant:
+          type: string
+        state_json:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    RoomResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoomItemView'
+    SubmissionResponse:
+      type: object
+      properties:
+        submission:
+          $ref: '#/components/schemas/Submission'
+        evaluation:
+          $ref: '#/components/schemas/EvaluationResult'
+        execution:
+          $ref: '#/components/schemas/RunnerReport'
+        anti_cheat:
+          $ref: '#/components/schemas/AntiCheatAssessment'
+        profile:
+          $ref: '#/components/schemas/UserProfile'
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSkill'
+        room:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoomItemView'
+        telemetry:
+          $ref: '#/components/schemas/TelemetrySummary'
+        template_id:
+          type: string
+        instance_id:
+          type: string
+        challenge_id:
+          type: string
+        visible_tests:
+          type: object
+          additionalProperties:
+            type: string
+    RankingEntry:
+      type: object
+      properties:
+        user_id:
+          type: string
+        username:
+          type: string
+        country:
+          type: string
+        current_skill_score:
+          type: number
+        confidence_score:
+          type: number
+        percentile:
+          type: number
+        rank:
+          type: integer
+        last_active_at:
+          type: string
+          format: date-time
+        completed_challenges:
+          type: integer
+    CandidateSummary:
+      type: object
+      description: Fast recruiter-facing summary intended to be readable in under 10 seconds.
+      properties:
+        score:
+          type: number
+        percentile:
+          type: number
+        confidence_score:
+          type: number
+        confidence_level:
+          type: string
+        last_active_at:
+          type: string
+          format: date-time
+        tasks_completed:
+          type: integer
+    CandidateView:
+      type: object
+      properties:
+        summary:
+          $ref: '#/components/schemas/CandidateSummary'
+        user_id:
+          type: string
+        username:
+          type: string
+        country:
+          type: string
+        current_skill_score:
+          type: number
+        percentile_global:
+          type: number
+        confidence_score:
+          type: number
+        confidence_level:
+          type: string
+        confidence_reasons:
+          type: array
+          items:
+            type: string
+        last_active_at:
+          type: string
+          format: date-time
+        tasks_solved:
+          type: integer
+        recent_activity:
+          type: array
+          items:
+            type: string
+        strengths:
+          type: array
+          items:
+            type: string
+        weaknesses:
+          type: array
+          items:
+            type: string

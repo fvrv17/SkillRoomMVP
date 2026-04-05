@@ -1,0 +1,41 @@
+import React from "react";
+
+function flattenRows(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  if (items.length === 0) {
+    return [];
+  }
+  if (Array.isArray(items[0]?.items)) {
+    return items.flatMap((section) =>
+      section.items.map((item) => ({
+        ...item,
+        sectionLabel: section.label
+      }))
+    );
+  }
+  return items;
+}
+
+export function {{component_name}}({
+  items,
+  height = {{viewport_height}},
+  rowHeight = {{row_height}},
+  overscan = {{overscan}},
+  scrollTop = 0
+}) {
+  const rows = flattenRows(items);
+
+  return (
+    <div aria-label="{{list_label}}">
+      {rows.map((item) => (
+        <div role="listitem" key={{{item_key_expr}}}>
+          {{{item_label_expr}}}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default {{component_name}};

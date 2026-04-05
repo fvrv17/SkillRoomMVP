@@ -1,0 +1,16 @@
+import React from "react";
+
+export function {{component_name}}({ items, computeSummary, heading = "Metrics" }) {
+  const summary = computeSummary(items);
+
+  return (
+    <section>
+      <h2>{heading}</h2>
+      <p aria-label="total-count">{summary.total}</p>
+      <p aria-label="passing-count">{summary.passing}</p>
+      <p aria-label="latest-label">{summary.latestLabel}</p>
+    </section>
+  );
+}
+
+export default {{component_name}};

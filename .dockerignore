@@ -1,0 +1,10 @@
+.git
+.github
+.gocache
+.swift-module-cache
+node_modules
+tmp
+dist
+coverage
+*.log
+deploy/docker-compose.override.yml

@@ -1,0 +1,20 @@
+import React, { useEffect, useState } from "react";
+
+function statusLabel(width, breakpoint) {
+  return width >= breakpoint ? "{{desktop_label}}" : "{{mobile_label}}";
+}
+
+export function {{component_name}}({ breakpoint = {{breakpoint}} }) {
+  const [width, setWidth] = useState(window.innerWidth);
+
+  useEffect(() => {
+    window.addEventListener("resize", () => {
+      setWidth(window.innerWidth);
+    });
+  }, [width]);
+
+  return <output aria-label="viewport status">{statusLabel(width, breakpoint)}</output>;
+}
+
+export default {{component_name}};
+

@@ -1,0 +1,31 @@
+import React from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+function setViewport(width) {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: width
+  });
+  fireEvent(window, new Event("resize"));
+}
+
+describe("{{component_name}}", () => {
+  beforeEach(() => {
+    setViewport({{breakpoint}} + 120);
+  });
+
+  it("shows the desktop label at or above the breakpoint", () => {
+    render(<{{component_name}} breakpoint={{{breakpoint}}} />);
+    expect(screen.getByLabelText("viewport status")).toHaveTextContent("{{desktop_label}}");
+  });
+
+  it("updates the label after a resize", () => {
+    render(<{{component_name}} breakpoint={{{breakpoint}}} />);
+    setViewport({{breakpoint}} - 20);
+    expect(screen.getByLabelText("viewport status")).toHaveTextContent("{{mobile_label}}");
+  });
+});
+

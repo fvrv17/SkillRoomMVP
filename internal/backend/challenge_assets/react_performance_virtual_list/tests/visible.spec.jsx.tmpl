@@ -1,0 +1,48 @@
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+const items = {{items_fixture}};
+
+describe("{{component_name}}", () => {
+  it("renders a smaller visible window than the full collection", () => {
+    render(
+      <{{component_name}}
+        items={items}
+        height={{{viewport_height}}}
+        rowHeight={{{row_height}}}
+        overscan={{{overscan}}}
+        scrollTop={0}
+      />
+    );
+
+    expect(screen.getAllByRole("listitem").length).toBeLessThan({{rows_total_count}});
+    expect(screen.getByText("{{first_visible_label}}")).toBeInTheDocument();
+  });
+
+  it("moves the window when scrollTop changes", () => {
+    const { rerender } = render(
+      <{{component_name}}
+        items={items}
+        height={{{viewport_height}}}
+        rowHeight={{{row_height}}}
+        overscan={{{overscan}}}
+        scrollTop={0}
+      />
+    );
+
+    rerender(
+      <{{component_name}}
+        items={items}
+        height={{{viewport_height}}}
+        rowHeight={{{row_height}}}
+        overscan={{{overscan}}}
+        scrollTop={{{scroll_target}}}
+      />
+    );
+
+    expect(screen.queryByText("{{first_visible_label}}")).not.toBeInTheDocument();
+    expect(screen.getByText("{{scrolled_visible_label}}")).toBeInTheDocument();
+  });
+});

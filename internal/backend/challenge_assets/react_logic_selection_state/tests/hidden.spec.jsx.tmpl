@@ -1,0 +1,39 @@
+import React from "react";
+import { renderHook, act } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { {{hook_name}} } from "../src/useSelectionState.js";
+
+const items = {{items_fixture}};
+
+describe("{{hook_name}} hidden checks", () => {
+  it("blocks disabled ids, applies group constraints, and removes stale selections when items change [quality:selection-pruning]", () => {
+    const { result, rerender } = renderHook(
+      ({ currentItems }) =>
+        {{hook_name}}(currentItems, {
+          maxSelected: {{max_selected}},
+          disabledIds: ["{{disabled_id}}"],
+          lockedIds: {{locked_ids}},
+          getGroupId: {{group_accessor}}
+        }),
+      {
+        initialProps: { currentItems: items }
+      }
+    );
+
+    act(() => {
+      result.current.toggle("{{disabled_id}}");
+      result.current.toggle("ada");
+      result.current.toggle("{{conflict_id}}");
+    });
+
+    expect(result.current.selectedIds).toEqual({{hidden_selected_after_toggle}});
+    expect(result.current.canSelect("{{disabled_id}}")).toBe(false);
+    expect(result.current.canSelect("{{conflict_id}}")).toBe({{conflict_selectable}});
+
+    rerender({
+      currentItems: {{single_item_fixture}}
+    });
+
+    expect(result.current.selectedIds).toEqual({{stale_expected}});
+  });
+});

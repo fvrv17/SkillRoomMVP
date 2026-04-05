@@ -1,0 +1,50 @@
+import React from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+describe("{{component_name}}", () => {
+  it("shows validation errors for invalid profile data", () => {
+    const onSubmit = vi.fn();
+    render(<{{component_name}} onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "A" }
+    });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "alex" }
+    });
+    fireEvent.change(screen.getByLabelText("Portfolio"), {
+      target: { value: "portfolio.dev" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    expect(screen.getAllByRole("alert")).toHaveLength(3);
+    expect(screen.getByText("Enter a full name")).toBeInTheDocument();
+    expect(screen.getByText("Enter a valid email")).toBeInTheDocument();
+    expect(screen.getByText("Enter a valid portfolio URL")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("normalizes valid profile data before submit", () => {
+    const onSubmit = vi.fn();
+    render(<{{component_name}} onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "  Alex Smith  " }
+    });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "  Alex@Example.com " }
+    });
+    fireEvent.change(screen.getByLabelText("Portfolio"), {
+      target: { value: "portfolio.dev/alex" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      name: "Alex Smith",
+      email: "alex@example.com",
+      portfolio: "https://portfolio.dev/alex"
+    });
+  });
+});

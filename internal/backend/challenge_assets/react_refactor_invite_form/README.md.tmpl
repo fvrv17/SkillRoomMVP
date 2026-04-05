@@ -1,0 +1,8 @@
+Refactor `InviteForm` without changing behavior.
+
+Requirements:
+- keep the generated component API unchanged
+- export and use `createInviteValidator`
+- export and use `buildInvitePayload`
+- validate names against the generated domain contract
+- submit a trimmed, lower-cased payload using the generated payload shape

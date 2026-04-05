@@ -1,0 +1,12 @@
+export async function retryOperation(task, options = {}) {
+  const {
+    retries = 2,
+    shouldRetry = () => true,
+    onAttempt = () => {}
+  } = options;
+
+  onAttempt(1);
+  return task(1, { retries, shouldRetry, onAttempt });
+}
+
+export default retryOperation;

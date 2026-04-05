@@ -1,0 +1,11 @@
+Implement `{{hook_name}}` so list selection stays consistent.
+
+Requirements:
+- read ids from the generated item path `{{item_id_expr}}`
+- toggle items in and out of the selection
+- prevent selecting ids in `disabledIds`
+- respect `maxSelected`
+- support the generated `lockedIds` and `getGroupId` contract
+- when full, `{{overflow_rule_description}}`
+- drop selections that no longer exist when `items` change
+- expose `selectedIds`, `canSelect`, `toggle`, and `clear`

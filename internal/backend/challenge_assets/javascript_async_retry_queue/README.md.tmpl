@@ -1,0 +1,7 @@
+Implement `retryOperation` so async retries are deterministic.
+
+Requirements:
+- retry failed tasks up to the configured limit
+- stop immediately when `shouldRetry` returns `false`
+- call `onAttempt` for each attempt
+- reject with the final error when retries are exhausted

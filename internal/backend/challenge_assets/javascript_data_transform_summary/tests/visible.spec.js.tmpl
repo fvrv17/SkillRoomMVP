@@ -1,0 +1,29 @@
+import { describe, expect, it } from "vitest";
+import { summarizeCandidates } from "../src/transform.js";
+
+const candidates = [
+  { id: "1", status: "applied", skills: ["react", "typescript"] },
+  { id: "2", status: "interview", skills: ["react", "testing"] },
+  { id: "3", status: "applied", skills: ["node", "testing"] }
+];
+
+describe("summarizeCandidates", () => {
+  it("returns total candidates and a status breakdown", () => {
+    expect(summarizeCandidates(candidates)).toMatchObject({
+      total: 3,
+      byStatus: {
+        applied: 2,
+        interview: 1
+      }
+    });
+  });
+
+  it("returns the top skills sorted by frequency and name", () => {
+    expect(summarizeCandidates(candidates).topSkills).toEqual([
+      { skill: "react", count: 2 },
+      { skill: "testing", count: 2 },
+      { skill: "node", count: 1 },
+      { skill: "typescript", count: 1 }
+    ]);
+  });
+});

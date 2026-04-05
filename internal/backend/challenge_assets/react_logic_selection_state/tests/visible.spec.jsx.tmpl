@@ -1,0 +1,36 @@
+import React from "react";
+import { renderHook, act } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { {{hook_name}} } from "../src/useSelectionState.js";
+
+const items = {{items_fixture}};
+
+describe("{{hook_name}}", () => {
+  it("toggles ids in and out of the selection", () => {
+    const { result } = renderHook(() => {{hook_name}}(items, { maxSelected: {{max_selected}} }));
+
+    act(() => {
+      result.current.toggle("ada");
+      result.current.toggle("grace");
+    });
+
+    expect(result.current.selectedIds).toEqual(["ada", "grace"]);
+
+    act(() => {
+      result.current.toggle("ada");
+    });
+
+    expect(result.current.selectedIds).toEqual(["grace"]);
+  });
+
+  it("applies the overflow rule when the selection is full", () => {
+    const { result } = renderHook(() => {{hook_name}}(items, { maxSelected: 1 }));
+
+    act(() => {
+      result.current.toggle("ada");
+      result.current.toggle("grace");
+    });
+
+    {{overflow_strategy_assertion}};
+  });
+});

@@ -1,0 +1,46 @@
+import React, { useEffect, useState } from "react";
+
+function flattenCandidates(source) {
+  if (!Array.isArray(source)) {
+    return [];
+  }
+  if (source.length === 0) {
+    return [];
+  }
+  return Array.isArray(source[0]) ? source.flat() : source;
+}
+
+export function {{component_name}}({
+  {{candidate_source_name}},
+  delay = {{debounce_ms}},
+  emptyMessage = "{{empty_state}}"
+}) {
+  const [query, setQuery] = useState("");
+  const [visibleCandidates, setVisibleCandidates] = useState(
+    flattenCandidates({{candidate_source_name}})
+  );
+
+  useEffect(() => {
+    // TODO debounce query updates and support sync arrays, paginated arrays, and async candidate loaders.
+  }, [query, delay, {{candidate_source_name}}]);
+
+  return (
+    <section>
+      <label htmlFor="candidate-search">{{input_label}}</label>
+      <input
+        id="candidate-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="{{placeholder}}"
+      />
+      <ul aria-label="{{results_label}}">
+        {visibleCandidates.map((candidate) => (
+          <li key={{{candidate_key}}}>{{{candidate_label_expr}}}</li>
+        ))}
+      </ul>
+      {visibleCandidates.length === 0 ? <p>{emptyMessage}</p> : null}
+    </section>
+  );
+}
+
+export default {{component_name}};

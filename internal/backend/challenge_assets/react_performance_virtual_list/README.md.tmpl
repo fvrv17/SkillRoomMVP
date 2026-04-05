@@ -1,0 +1,9 @@
+Optimize `{{component_name}}` so it renders a visible window instead of the entire list.
+
+Requirements:
+- keep the public props unchanged
+- support the generated item data shape, including grouped sections
+- render only the rows needed for the current window plus `overscan`
+- expose spacer elements with `data-testid="top-spacer"` and `data-testid="bottom-spacer"`
+- keep list order correct as `scrollTop` changes
+- avoid rendering the full collection

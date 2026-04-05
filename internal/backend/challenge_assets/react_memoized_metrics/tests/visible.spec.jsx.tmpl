@@ -1,0 +1,29 @@
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+const items = [
+  { id: "1", passed: true, label: "Ada" },
+  { id: "2", passed: false, label: "Grace" },
+  { id: "3", passed: true, label: "Margaret" }
+];
+
+describe("{{component_name}}", () => {
+  it("renders the computed summary", () => {
+    render(
+      <{{component_name}}
+        items={items}
+        computeSummary={(records) => ({
+          total: records.length,
+          passing: records.filter((record) => record.passed).length,
+          latestLabel: records[records.length - 1].label
+        })}
+      />
+    );
+
+    expect(screen.getByLabelText("total-count")).toHaveTextContent("3");
+    expect(screen.getByLabelText("passing-count")).toHaveTextContent("2");
+    expect(screen.getByLabelText("latest-label")).toHaveTextContent("Margaret");
+  });
+});

@@ -1,0 +1,18 @@
+export function createLRUCache(limit = 3) {
+  return {
+    set() {
+      return this;
+    },
+    get() {
+      return undefined;
+    },
+    has() {
+      return false;
+    },
+    entries() {
+      return [];
+    }
+  };
+}
+
+export default createLRUCache;

@@ -1,0 +1,26 @@
+import React, { useEffect, useRef } from "react";
+
+export function {{component_name}}({ open = true, onClose, title = "Filters" }) {
+  const panelRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    // TODO add a single document listener that closes only for outside clicks, then clean it up.
+    return undefined;
+  }, [open, onClose]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <section ref={panelRef}>
+      <h2>{title}</h2>
+      <button type="button">Keep open</button>
+    </section>
+  );
+}
+
+export default {{component_name}};

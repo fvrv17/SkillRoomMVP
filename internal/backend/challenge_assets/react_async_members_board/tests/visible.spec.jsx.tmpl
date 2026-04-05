@@ -1,0 +1,37 @@
+import React from "react";
+import { act, render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+describe("{{component_name}}", () => {
+  it("loads and renders team members", async () => {
+    const loadMembers = async (teamId) => {
+      expect(teamId).toBe("frontend");
+      return [
+        { id: "ada", name: "Ada" },
+        { id: "grace", name: "Grace" }
+      ];
+    };
+
+    render(<{{component_name}} teamId="frontend" loadMembers={loadMembers} />);
+    expect(screen.getByLabelText("status")).toHaveTextContent("loading");
+
+    await act(async () => {});
+
+    expect(screen.getByLabelText("status")).toHaveTextContent("success");
+    expect(screen.getByText("Ada")).toBeInTheDocument();
+    expect(screen.getByText("Grace")).toBeInTheDocument();
+  });
+
+  it("shows an error state when the request fails", async () => {
+    const loadMembers = async () => {
+      throw new Error("Unable to load team");
+    };
+
+    render(<{{component_name}} teamId="frontend" loadMembers={loadMembers} />);
+    await act(async () => {});
+
+    expect(screen.getByLabelText("status")).toHaveTextContent("error");
+    expect(screen.getByRole("alert")).toHaveTextContent("Unable to load team");
+  });
+});

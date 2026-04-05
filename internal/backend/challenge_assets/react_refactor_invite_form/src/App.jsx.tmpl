@@ -1,0 +1,63 @@
+import React, { useState } from "react";
+
+export function createInviteValidator({{allowed_input_name}} = {{allowed_input_default}}) {
+  return function validateInvite(name, email) {
+    const normalizedName = name.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (normalizedName.length < 2) {
+      return { valid: false, message: "Enter a full name" };
+    }
+
+    {{validator_condition}}
+
+    return { valid: true, message: "" };
+  };
+}
+
+export function buildInvitePayload(name, email, role) {
+  const normalizedName = name.trim();
+  const normalizedEmail = email.trim().toLowerCase();
+  {{payload_return}}
+}
+
+export function InviteForm({ onSubmit, {{allowed_input_name}} = {{allowed_input_default}} }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("member");
+  const [error, setError] = useState("");
+  const validateInvite = createInviteValidator({{allowed_input_name}});
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const validation = validateInvite(name, email);
+    if (!validation.valid) {
+      setError(validation.message);
+      return;
+    }
+
+    setError("");
+    onSubmit(buildInvitePayload(name, email, role));
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <label htmlFor="invite-name">Name</label>
+      <input id="invite-name" value={name} onChange={(event) => setName(event.target.value)} />
+
+      <label htmlFor="invite-email">Email</label>
+      <input id="invite-email" value={email} onChange={(event) => setEmail(event.target.value)} />
+
+      <label htmlFor="invite-role">Role</label>
+      <select id="invite-role" value={role} onChange={(event) => setRole(event.target.value)}>
+        <option value="member">Member</option>
+        <option value="reviewer">Reviewer</option>
+      </select>
+
+      {error ? <p role="alert">{error}</p> : null}
+      <button type="submit">Send invite</button>
+    </form>
+  );
+}
+
+export default InviteForm;

@@ -1,0 +1,32 @@
+import { describe, expect, it } from "vitest";
+import { normalizeProfile, validateProfile } from "../src/App.jsx";
+
+describe("{{component_name}} hidden checks", () => {
+  it("exports helper functions with the expected behavior [quality:helper-validation]", () => {
+    expect(validateProfile({
+      name: "A",
+      email: "alex",
+      portfolio: "portfolio.dev"
+    })).toEqual({
+      name: "Enter a full name",
+      email: "Enter a valid email",
+      portfolio: "Enter a valid portfolio URL"
+    });
+
+    expect(validateProfile({
+      name: "Alex Smith",
+      email: "alex@example.com",
+      portfolio: "https://portfolio.dev/alex"
+    })).toEqual({});
+
+    expect(normalizeProfile({
+      name: "  Alex Smith  ",
+      email: "  Alex@Example.com ",
+      portfolio: "portfolio.dev/alex"
+    })).toEqual({
+      name: "Alex Smith",
+      email: "alex@example.com",
+      portfolio: "https://portfolio.dev/alex"
+    });
+  });
+});

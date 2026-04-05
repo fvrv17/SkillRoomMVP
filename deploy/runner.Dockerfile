@@ -1,0 +1,26 @@
+FROM golang:1.26 AS builder
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/runner-service ./cmd/runner-service
+
+FROM node:20-alpine
+
+RUN apk add --no-cache ca-certificates tzdata wget docker-cli
+
+WORKDIR /opt/skillroom-runtime
+
+COPY deploy/runner-runtime/package.json ./package.json
+RUN npm install --ignore-scripts
+
+COPY deploy/runner-runtime/run-evaluation.mjs ./run-evaluation.mjs
+COPY --from=builder /out/runner-service /usr/local/bin/runner-service
+
+EXPOSE 8081
+
+ENTRYPOINT ["/usr/local/bin/runner-service"]

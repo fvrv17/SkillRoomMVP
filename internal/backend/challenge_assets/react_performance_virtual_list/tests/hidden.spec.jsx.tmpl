@@ -1,0 +1,24 @@
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import {{component_name}} from "../src/App.jsx";
+
+const items = {{items_fixture}};
+
+describe("{{component_name}} hidden checks", () => {
+  it("uses spacers and keeps the rendered window bounded [quality:bounded-window]", () => {
+    render(
+      <{{component_name}}
+        items={items}
+        height={{{viewport_height}}}
+        rowHeight={{{row_height}}}
+        overscan={{{overscan}}}
+        scrollTop={{{row_height}} * 10}
+      />
+    );
+
+    expect(screen.getByTestId("top-spacer")).toBeInTheDocument();
+    expect(screen.getByTestId("bottom-spacer")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem").length).toBeLessThanOrEqual({{max_visible_count}});
+  });
+});
