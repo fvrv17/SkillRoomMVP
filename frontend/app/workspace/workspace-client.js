@@ -6,6 +6,17 @@ import { useRouter } from "next/navigation";
 
 import { apiFetch, clearAuth, loadAuth, loadPreview, loadRegionId, setPreview } from "@/lib/client";
 import { createPreviewChallenge, PREVIEW_DATA, PREVIEW_TEMPLATES, REGIONS } from "@/lib/preview-data";
+import {
+  ROOM_DEFAULT_THEME_ID,
+  ROOM_DEFAULT_WINDOW_SCENE_ID,
+  ROOM_SCENE_ORDER,
+  ROOM_SCENE_SLOTS,
+  ROOM_THEMES,
+  ROOM_WINDOW_SCENES,
+  normalizeRoomLevel,
+  normalizeRoomTheme,
+  normalizeWindowScene,
+} from "@/lib/room-scene-config";
 
 const NAV_ITEMS = [
   { id: "overview", label: "Overview" },
@@ -41,6 +52,9 @@ export default function WorkspaceClient() {
   const [hintResult, setHintResult] = useState(null);
   const [explanationResult, setExplanationResult] = useState(null);
   const [busyAction, setBusyAction] = useState("");
+  const [selectedRoomCode, setSelectedRoomCode] = useState("");
+  const roomThemeID = ROOM_DEFAULT_THEME_ID;
+  const windowSceneID = ROOM_DEFAULT_WINDOW_SCENE_ID;
 
   useEffect(() => {
     const auth = loadAuth();
@@ -74,6 +88,25 @@ export default function WorkspaceClient() {
   const visibleTests = currentChallenge?.visibleTests || {};
   const editorContent = activeFile ? editorFiles[activeFile] || "" : "";
   const editorLanguage = activeFile.endsWith(".js") ? "js" : "jsx";
+  const orderedRoomItems = useMemo(
+    () =>
+      ROOM_SCENE_ORDER.map((code) => roomItems.find((item) => item.room_item_code === code)).filter(Boolean),
+    [roomItems],
+  );
+  const selectedRoomItem = orderedRoomItems.find((item) => item.room_item_code === selectedRoomCode) || orderedRoomItems[0] || null;
+  const selectedRoomSlot = selectedRoomItem ? ROOM_SCENE_SLOTS[selectedRoomItem.room_item_code] : null;
+
+  useEffect(() => {
+    if (orderedRoomItems.length === 0) {
+      if (selectedRoomCode) {
+        setSelectedRoomCode("");
+      }
+      return;
+    }
+    if (!orderedRoomItems.some((item) => item.room_item_code === selectedRoomCode)) {
+      setSelectedRoomCode(orderedRoomItems[0].room_item_code);
+    }
+  }, [orderedRoomItems, selectedRoomCode]);
 
   async function loadWorkspace(currentSession) {
     setLoading(true);
@@ -482,7 +515,7 @@ export default function WorkspaceClient() {
                 Open room
               </button>
             </div>
-            <RoomStage items={roomItems} compact />
+            <RoomStage items={roomItems} compact themeID={roomThemeID} windowSceneID={windowSceneID} />
           </div>
         </section>
       ) : null}
@@ -670,36 +703,29 @@ export default function WorkspaceClient() {
 
       {activeView === "room" ? (
         <section className="workspace-grid workspace-grid--room">
-          <div className="card card--span-2">
+          <div className="card room-scene-card">
             <div className="section-heading">
               <div>
                 <p className="eyebrow">Skill room</p>
                 <h3>Every item is mapped to a real signal</h3>
               </div>
             </div>
-            <RoomStage items={roomItems} />
+            <RoomStage
+              items={roomItems}
+              selectedCode={selectedRoomCode}
+              onSelect={setSelectedRoomCode}
+              themeID={roomThemeID}
+              windowSceneID={windowSceneID}
+            />
           </div>
-          <div className="card">
-            <p className="eyebrow">Item explanations</p>
-            <div className="room-details">
-              {roomItems.map((item) => {
-                const state = readState(item);
-                return (
-                  <div key={item.room_item_code} className="room-detail">
-                    <div>
-                      <strong>{roomLabel(item.room_item_code)}</strong>
-                      <span>{item.current_level}</span>
-                    </div>
-                    <p>{state.explanation || "No explanation yet."}</p>
-                    <ul className="plain-list">
-                      {(state.linked_tasks || []).map((task) => (
-                        <li key={task}>{task}</li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })}
-            </div>
+          <div className="card room-inspector">
+            <p className="eyebrow">Item inspector</p>
+            <RoomInspector
+              item={selectedRoomItem}
+              slot={selectedRoomSlot}
+              onSelect={setSelectedRoomCode}
+              items={orderedRoomItems}
+            />
           </div>
         </section>
       ) : null}
@@ -875,6 +901,9 @@ async function fetchCandidates(token, filters) {
 }
 
 function readState(item) {
+  if (!item || typeof item !== "object") {
+    return {};
+  }
   return item.state_json || item.state || {};
 }
 
@@ -926,8 +955,54 @@ function roomLabel(code) {
   }
 }
 
+function roomPresentationMode(slot, item) {
+  const state = readState(item);
+  return state.presentation_mode || slot?.presentationMode || "tiered";
+}
+
+function roomAchievementEntries(item) {
+  const raw = readState(item).achievements;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      return {
+        code: String(entry.code || ""),
+        title: String(entry.title || entry.code || "Achievement"),
+        description: String(entry.description || ""),
+      };
+    })
+    .filter(Boolean);
+}
+
+function roomAchievementCount(item) {
+  const state = readState(item);
+  const numeric = Number(state.achievement_count);
+  if (Number.isFinite(numeric) && numeric >= 0) {
+    return numeric;
+  }
+  return roomAchievementEntries(item).length;
+}
+
+function roomMetaLabel(slot, item) {
+  if (roomPresentationMode(slot, item) === "achievement_case") {
+    const count = roomAchievementCount(item);
+    if (count === 0) {
+      return "No trophies";
+    }
+    return count === 1 ? "1 trophy" : `${count} trophies`;
+  }
+  return item?.current_level || "bronze";
+}
+
 function levelClass(level) {
   switch (String(level || "").toLowerCase()) {
+    case "platinum":
+      return "level-platinum";
     case "gold":
       return "level-gold";
     case "silver":
@@ -1054,34 +1129,156 @@ function classifyToken(value) {
   return "function";
 }
 
-function RoomStage({ items, compact = false }) {
+function RoomStage({ items, compact = false, selectedCode = "", onSelect, themeID = ROOM_DEFAULT_THEME_ID, windowSceneID = ROOM_DEFAULT_WINDOW_SCENE_ID }) {
   const indexed = {};
   for (const item of items || []) {
     indexed[item.room_item_code] = item;
   }
+  const interactive = typeof onSelect === "function" && !compact;
+  const theme = ROOM_THEMES[normalizeRoomTheme(themeID)];
+  const windowScene = ROOM_WINDOW_SCENES[normalizeWindowScene(windowSceneID)];
 
   return (
-    <div className={compact ? "room-stage room-stage--compact" : "room-stage"}>
-      <div className="room-wall room-wall--left" />
-      <div className="room-wall room-wall--right" />
-      <div className="room-floor" />
-      <RoomItem code="chair" item={indexed.chair} />
-      <RoomItem code="shelf" item={indexed.shelf} />
-      <RoomItem code="monitor" item={indexed.monitor} />
-      <RoomItem code="desk" item={indexed.desk} />
-      <RoomItem code="plant" item={indexed.plant} />
-      <RoomItem code="trophy_case" item={indexed.trophy_case} />
-      <div className="room-rug" />
+    <div className={compact ? `room-stage room-stage--compact room-stage--${theme.id}` : `room-stage room-stage--${theme.id}`}>
+      <div className="room-stage__canvas">
+        <img className="room-stage__window-scene" src={windowScene.asset} alt="" aria-hidden="true" />
+        <img className="room-stage__shell" src={theme.shellAsset} alt="" aria-hidden="true" />
+        {theme.overlayAsset ? <img className="room-stage__theme-overlay" src={theme.overlayAsset} alt="" aria-hidden="true" /> : null}
+        {ROOM_SCENE_ORDER.map((code) => (
+          <RoomSlot
+            key={code}
+            slot={ROOM_SCENE_SLOTS[code]}
+            item={indexed[code]}
+            interactive={interactive}
+            selected={selectedCode === code}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-function RoomItem({ code, item }) {
-  const level = item?.current_level || "bronze";
+function RoomSlot({ slot, item, interactive, selected, onSelect }) {
+  const level = normalizeRoomLevel(item?.current_level);
+  const presentationMode = roomPresentationMode(slot, item);
+  const showLevelBadge = slot.showLevelBadge !== false && presentationMode !== "achievement_case";
+  const assetPath = slot.availableLevels?.includes(level) ? slot.assets?.[level] : "";
+  const itemLabel = presentationMode === "achievement_case" ? `${slot.title} ${roomMetaLabel(slot, item)}` : `${slot.title} ${level}`;
+  const itemTitle = presentationMode === "achievement_case" ? `${slot.title} • ${roomMetaLabel(slot, item)}` : `${slot.title} • ${labelize(level)}`;
   return (
-    <div className={`scene-item scene-item--${code} scene-item--${level}`}>
-      <span>{roomLabel(code)}</span>
-      <strong>{level}</strong>
+    <div
+      className={`room-slot room-slot--${slot.code} room-slot--${level}${selected ? " is-selected" : ""}`}
+      style={slot.style}
+      aria-label={itemLabel}
+      title={itemTitle}
+    >
+      <button
+        type="button"
+        className="room-slot__button"
+        onClick={() => onSelect?.(slot.code)}
+        disabled={!interactive}
+        aria-pressed={selected}
+      >
+        <div className="room-slot__shadow" />
+        {assetPath ? (
+          <img className="room-slot__asset" src={assetPath} alt="" aria-hidden="true" />
+        ) : (
+          <div className={`room-slot__placeholder room-slot__placeholder--${slot.code}`}>
+            <div className="room-slot__silhouette" />
+            {showLevelBadge ? <span className={`room-slot__level-badge room-slot__level-badge--${level}`}>{level}</span> : null}
+          </div>
+        )}
+      </button>
+    </div>
+  );
+}
+
+function RoomInspector({
+  item,
+  slot,
+  items,
+  onSelect,
+}) {
+  if (!item || !slot) {
+    return (
+      <div className="empty-panel">
+        <h3>Select an item</h3>
+        <p>The room inspector shows the skill mapping, level, and linked evidence for the selected slot.</p>
+      </div>
+    );
+  }
+
+  const state = readState(item);
+  const presentationMode = roomPresentationMode(slot, item);
+  const achievementEntries = roomAchievementEntries(item);
+  return (
+    <div className="room-inspector__stack">
+      <div className="room-inspector__hero">
+        <div>
+          <p className="room-inspector__skill">{slot.skill}</p>
+          <h3>{roomLabel(item.room_item_code)}</h3>
+        </div>
+        {presentationMode === "achievement_case" ? (
+          <span className="room-inspector__meta">{roomMetaLabel(slot, item)}</span>
+        ) : (
+          <span className={`skill-level ${levelClass(item.current_level)}`}>{item.current_level}</span>
+        )}
+      </div>
+
+      <div className="room-inspector__selector">
+        {items.map((entry) => (
+          <button
+            key={entry.room_item_code}
+            type="button"
+            className={entry.room_item_code === item.room_item_code ? "room-inspector__chip active" : "room-inspector__chip"}
+            onClick={() => onSelect(entry.room_item_code)}
+          >
+            <span>{labelize(entry.room_item_code)}</span>
+            <strong>{roomMetaLabel(ROOM_SCENE_SLOTS[entry.room_item_code], entry)}</strong>
+          </button>
+        ))}
+      </div>
+
+      <div className="room-inspector__section">
+        <span className="room-inspector__label">Mapped signal</span>
+        <p>{state.explanation || "No explanation yet."}</p>
+      </div>
+
+      {presentationMode === "achievement_case" ? (
+        <div className="room-inspector__section">
+          <span className="room-inspector__label">Unlocked trophies</span>
+          {achievementEntries.length > 0 ? (
+            <ul className="plain-list">
+              {achievementEntries.map((achievement) => (
+                <li key={achievement.code || achievement.title}>
+                  <strong>{achievement.title}</strong>
+                  {achievement.description ? ` — ${achievement.description}` : ""}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted-copy">The case is empty until verified milestones are reached.</p>
+          )}
+        </div>
+      ) : null}
+
+      <div className="room-inspector__section">
+        <span className="room-inspector__label">{presentationMode === "achievement_case" ? "Recent evidence" : "Linked tasks"}</span>
+        {(state.linked_tasks || []).length > 0 ? (
+          <ul className="plain-list">
+            {state.linked_tasks.map((task) => (
+              <li key={task}>{task}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted-copy">
+            {presentationMode === "achievement_case"
+              ? "Verified activity will appear here as trophies are earned."
+              : "Evidence appears here once tasks are completed and scored."}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

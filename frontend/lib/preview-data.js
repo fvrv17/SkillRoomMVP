@@ -138,9 +138,29 @@ export const PREVIEW_DATA = {
     },
     {
       room_item_code: "trophy_case",
-      current_level: "gold",
+      current_level: "static",
       state_json: {
-        explanation: "Top decile percentile unlocks a lit trophy case.",
+        presentation_mode: "achievement_case",
+        case_variant: "default",
+        achievement_count: 3,
+        achievements: [
+          {
+            code: "challenge_volume_10",
+            title: "10 verified challenges",
+            description: "14 completed challenges create a reliable volume signal.",
+          },
+          {
+            code: "category_coverage_4",
+            title: "Cross-category range",
+            description: "The preview profile shows validated work across multiple challenge categories.",
+          },
+          {
+            code: "streak_3",
+            title: "3-day streak",
+            description: "A 4 day streak unlocked a consistency trophy.",
+          },
+        ],
+        explanation: "3 verified trophies are currently on display.",
         linked_tasks: ["Global percentile 89", "Country percentile 92"],
       },
     },

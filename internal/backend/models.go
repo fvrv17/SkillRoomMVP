@@ -77,6 +77,12 @@ type UserRoomItem struct {
 	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
+type TrophyAchievement struct {
+	Code        string `json:"code"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
 type ChallengeTemplate struct {
 	ID                   string              `json:"id"`
 	Slug                 string              `json:"slug"`

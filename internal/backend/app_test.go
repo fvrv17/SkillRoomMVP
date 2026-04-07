@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	runsvc "github.com/fvrv17/mvp/internal/runner"
 )
@@ -104,6 +105,96 @@ func TestChallengeFlowUsesTelemetryAndServerEvaluation(t *testing.T) {
 	}
 	if len(result.Room) != 6 {
 		t.Fatalf("expected 6 room items, got %d", len(result.Room))
+	}
+}
+
+func TestTrophyCaseUsesAchievementState(t *testing.T) {
+	app := newTestApp()
+	router := app.Router()
+
+	token := registerAndLogin(t, router, RegisterRequest{
+		Email:    "trophy@example.com",
+		Username: "trophy",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleUser,
+	})
+
+	app.mu.Lock()
+	for userID, user := range app.users {
+		if user.Email != "trophy@example.com" {
+			continue
+		}
+		user.Profile.CompletedChallenges = 12
+		user.Profile.ConfidenceScore = 86
+		user.Profile.PercentileGlobal = 93
+		user.Profile.StreakDays = 7
+		user.Profile.UpdatedAt = time.Now().UTC()
+		app.users[userID] = user
+		app.scoreHistory[userID] = []float64{78, 80, 82, 81, 79}
+		app.updateAllRoomTrophiesLocked()
+		break
+	}
+	app.mu.Unlock()
+
+	roomResp := performJSON(t, router, http.MethodGet, "/v1/room", nil, token)
+	if roomResp.Code != http.StatusOK {
+		t.Fatalf("get room: %d", roomResp.Code)
+	}
+
+	var payload struct {
+		Items []UserRoomItem `json:"items"`
+	}
+	if err := json.NewDecoder(roomResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode room payload: %v", err)
+	}
+
+	var trophy UserRoomItem
+	found := false
+	for _, item := range payload.Items {
+		if item.RoomItemCode == "trophy_case" {
+			trophy = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected trophy_case in room payload")
+	}
+	if trophy.CurrentLevel != "static" {
+		t.Fatalf("expected trophy_case current_level static, got %s", trophy.CurrentLevel)
+	}
+	if trophy.CurrentVariant != "trophy_case_default" {
+		t.Fatalf("expected trophy_case default variant, got %s", trophy.CurrentVariant)
+	}
+	if trophy.State["presentation_mode"] != "achievement_case" {
+		t.Fatalf("expected achievement_case presentation mode, got %#v", trophy.State["presentation_mode"])
+	}
+	if _, ok := trophy.State["level"]; ok {
+		t.Fatal("expected trophy_case state to omit tier level")
+	}
+	achievementCount, ok := trophy.State["achievement_count"].(float64)
+	if !ok || achievementCount < 4 {
+		t.Fatalf("expected achievement_count >= 4, got %#v", trophy.State["achievement_count"])
+	}
+
+	rawAchievements, ok := trophy.State["achievements"].([]any)
+	if !ok || len(rawAchievements) == 0 {
+		t.Fatalf("expected achievements array, got %#v", trophy.State["achievements"])
+	}
+	foundTopTen := false
+	for _, raw := range rawAchievements {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if entry["code"] == "top_percentile_10" {
+			foundTopTen = true
+			break
+		}
+	}
+	if !foundTopTen {
+		t.Fatalf("expected top_percentile_10 achievement, got %#v", rawAchievements)
 	}
 }
 

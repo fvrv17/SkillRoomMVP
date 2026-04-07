@@ -109,30 +109,6 @@ export default function LandingClient() {
             ))}
           </div>
         </div>
-        <div className="room-stage room-stage--landing">
-          <div className="room-wall room-wall--left" />
-          <div className="room-wall room-wall--right" />
-          <div className="room-floor" />
-          <div className="room-window">
-            <span />
-          </div>
-          <div className="room-shelf">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className="room-desk">
-            <div className="room-monitor">
-              <span />
-            </div>
-          </div>
-          <div className="room-plant">
-            <span />
-          </div>
-          <div className="room-chair" />
-          <div className="room-rug" />
-          <div className="room-trophy" />
-        </div>
       </section>
 
       <section className="landing-panel">

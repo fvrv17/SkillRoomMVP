@@ -1868,14 +1868,15 @@ func (a *App) initUserStateLocked(userID string, now time.Time) {
 	}
 	a.userRoomItems[userID] = map[string]UserRoomItem{}
 	for _, roomItem := range a.roomItems {
+		level := roomInitialLevel(roomItem.Code)
 		a.userRoomItems[userID][roomItem.Code] = UserRoomItem{
 			ID:             id.New("rit"),
 			UserID:         userID,
 			RoomItemID:     roomItem.ID,
 			RoomItemCode:   roomItem.Code,
-			CurrentLevel:   "bronze",
-			CurrentVariant: roomVariant(roomItem.Code, "bronze"),
-			State:          map[string]any{"glow": false, "track": "react"},
+			CurrentLevel:   level,
+			CurrentVariant: roomDefaultVariant(roomItem.Code, level),
+			State:          roomDefaultState(roomItem.Code),
 			UpdatedAt:      now,
 		}
 	}
@@ -2154,18 +2155,95 @@ func (a *App) updateAllRoomTrophiesLocked() {
 			continue
 		}
 		items := a.userRoomItems[userID]
-		trophy := items["trophy_case"]
-		trophy.CurrentLevel = percentileLevel(user.Profile.PercentileGlobal)
-		trophy.CurrentVariant = roomVariant("trophy_case", trophy.CurrentLevel)
+		trophy, ok := items["trophy_case"]
+		if !ok {
+			continue
+		}
+		achievements := a.buildTrophyAchievementsLocked(userID, user)
+		trophy.CurrentLevel = roomInitialLevel("trophy_case")
+		trophy.CurrentVariant = roomDefaultVariant("trophy_case", trophy.CurrentLevel)
 		trophy.State = map[string]any{
-			"percentile_global": user.Profile.PercentileGlobal,
-			"level":             trophy.CurrentLevel,
-			"explanation":       fmt.Sprintf("Percentile %.2f unlocks the trophy case.", user.Profile.PercentileGlobal),
+			"presentation_mode": "achievement_case",
+			"case_variant":      "default",
+			"achievement_count": len(achievements),
+			"achievements":      achievements,
+			"explanation":       trophyCaseExplanation(achievements),
 			"linked_tasks":      a.recentActivityLocked(userID),
 		}
 		trophy.UpdatedAt = time.Now().UTC()
 		items["trophy_case"] = trophy
 		a.userRoomItems[userID] = items
+	}
+}
+
+func (a *App) buildTrophyAchievementsLocked(userID string, user User) []TrophyAchievement {
+	achievements := make([]TrophyAchievement, 0, 6)
+	appendAchievement := func(code, title, description string) {
+		achievements = append(achievements, TrophyAchievement{
+			Code:        code,
+			Title:       title,
+			Description: description,
+		})
+	}
+
+	if user.Profile.PercentileGlobal >= 99 {
+		appendAchievement("top_percentile_1", "Top 1% globally", fmt.Sprintf("Global percentile %.2f places this candidate in the top 1%%.", user.Profile.PercentileGlobal))
+	} else if user.Profile.PercentileGlobal >= 90 {
+		appendAchievement("top_percentile_10", "Top 10% globally", fmt.Sprintf("Global percentile %.2f places this candidate in the top 10%%.", user.Profile.PercentileGlobal))
+	}
+
+	if user.Profile.CompletedChallenges >= 25 {
+		appendAchievement("challenge_volume_25", "25 verified challenges", fmt.Sprintf("%d completed challenges prove repeatable delivery.", user.Profile.CompletedChallenges))
+	} else if user.Profile.CompletedChallenges >= 10 {
+		appendAchievement("challenge_volume_10", "10 verified challenges", fmt.Sprintf("%d completed challenges make the track record more trustworthy.", user.Profile.CompletedChallenges))
+	}
+
+	if user.Profile.ConfidenceScore >= 85 {
+		appendAchievement("high_confidence", "High confidence signal", fmt.Sprintf("Confidence score %.0f reflects stable and trustworthy outcomes.", user.Profile.ConfidenceScore))
+	}
+
+	if user.Profile.StreakDays >= 7 {
+		appendAchievement("streak_7", "7-day streak", fmt.Sprintf("%d consecutive active days unlocked a consistency trophy.", user.Profile.StreakDays))
+	} else if user.Profile.StreakDays >= 3 {
+		appendAchievement("streak_3", "3-day streak", fmt.Sprintf("%d consecutive active days established momentum.", user.Profile.StreakDays))
+	}
+
+	if coverage := a.categoryCoverageLocked(userID); coverage >= 4 {
+		appendAchievement("category_coverage_4", "Cross-category range", fmt.Sprintf("%d challenge categories have been solved successfully.", coverage))
+	}
+
+	if len(a.scoreHistory[userID]) >= 5 && a.consistencyScoreLocked(userID) >= 75 {
+		appendAchievement("stable_results", "Stable recent results", fmt.Sprintf("Recent scoring has stayed stable across %d validated runs.", len(a.scoreHistory[userID])))
+	}
+
+	return achievements
+}
+
+func (a *App) categoryCoverageLocked(userID string) int {
+	categories := map[string]struct{}{}
+	for _, submission := range a.submissions {
+		instance, ok := a.instances[submission.ChallengeInstanceID]
+		if !ok || instance.UserID != userID {
+			continue
+		}
+		templateDef, ok := a.templates[instance.TemplateID]
+		if !ok || strings.TrimSpace(templateDef.Category) == "" {
+			continue
+		}
+		categories[templateDef.Category] = struct{}{}
+	}
+	return len(categories)
+}
+
+func trophyCaseExplanation(achievements []TrophyAchievement) string {
+	count := len(achievements)
+	switch count {
+	case 0:
+		return "The trophy case stays neutral until verified achievements are unlocked."
+	case 1:
+		return "1 verified trophy is currently on display."
+	default:
+		return fmt.Sprintf("%d verified trophies are currently on display.", count)
 	}
 }
 
@@ -2195,19 +2273,6 @@ func levelForScore(score float64) string {
 	}
 }
 
-func percentileLevel(percentile float64) string {
-	switch {
-	case percentile >= 95:
-		return "platinum"
-	case percentile >= 80:
-		return "gold"
-	case percentile >= 50:
-		return "silver"
-	default:
-		return "bronze"
-	}
-}
-
 func levelForCompleted(count int) string {
 	switch {
 	case count >= 20:
@@ -2223,6 +2288,34 @@ func levelForCompleted(count int) string {
 
 func roomVariant(code, level string) string {
 	return fmt.Sprintf("%s_%s", code, level)
+}
+
+func roomInitialLevel(code string) string {
+	if code == "trophy_case" {
+		return "static"
+	}
+	return "bronze"
+}
+
+func roomDefaultVariant(code, level string) string {
+	if code == "trophy_case" {
+		return "trophy_case_default"
+	}
+	return roomVariant(code, firstNonEmpty(level, roomInitialLevel(code)))
+}
+
+func roomDefaultState(code string) map[string]any {
+	if code == "trophy_case" {
+		return map[string]any{
+			"presentation_mode": "achievement_case",
+			"case_variant":      "default",
+			"achievement_count": 0,
+			"achievements":      []TrophyAchievement{},
+			"explanation":       trophyCaseExplanation(nil),
+			"linked_tasks":      []string{},
+		}
+	}
+	return map[string]any{"glow": false, "track": "react"}
 }
 
 func pairKey(a, b string) string {
@@ -2555,25 +2648,50 @@ func (a *App) normalizeUserRoomItemsLocked(userID string, fallbackTime time.Time
 	for _, roomItem := range a.roomItems {
 		item, ok := items[roomItem.Code]
 		if !ok {
+			level := roomInitialLevel(roomItem.Code)
 			items[roomItem.Code] = UserRoomItem{
 				ID:             id.New("rit"),
 				UserID:         userID,
 				RoomItemID:     roomItem.ID,
 				RoomItemCode:   roomItem.Code,
-				CurrentLevel:   "bronze",
-				CurrentVariant: roomVariant(roomItem.Code, "bronze"),
-				State:          map[string]any{"glow": false, "track": "react"},
+				CurrentLevel:   level,
+				CurrentVariant: roomDefaultVariant(roomItem.Code, level),
+				State:          roomDefaultState(roomItem.Code),
 				UpdatedAt:      fallbackTime,
 			}
 			continue
 		}
 		item.RoomItemID = roomItem.ID
 		item.RoomItemCode = roomItem.Code
-		if item.CurrentVariant == "" {
-			item.CurrentVariant = roomVariant(roomItem.Code, firstNonEmpty(item.CurrentLevel, "bronze"))
-		}
 		if item.State == nil {
-			item.State = map[string]any{}
+			item.State = roomDefaultState(roomItem.Code)
+		}
+		if roomItem.Code == "trophy_case" {
+			item.CurrentLevel = roomInitialLevel(roomItem.Code)
+			item.CurrentVariant = roomDefaultVariant(roomItem.Code, item.CurrentLevel)
+			item.State["presentation_mode"] = "achievement_case"
+			item.State["case_variant"] = "default"
+			if _, ok := item.State["achievement_count"]; !ok {
+				item.State["achievement_count"] = 0
+			}
+			if _, ok := item.State["achievements"]; !ok {
+				item.State["achievements"] = []TrophyAchievement{}
+			}
+			if _, ok := item.State["explanation"]; !ok {
+				item.State["explanation"] = trophyCaseExplanation(nil)
+			}
+			if _, ok := item.State["linked_tasks"]; !ok {
+				item.State["linked_tasks"] = []string{}
+			}
+			delete(item.State, "level")
+			items[roomItem.Code] = item
+			continue
+		}
+		if item.CurrentLevel == "" {
+			item.CurrentLevel = roomInitialLevel(roomItem.Code)
+		}
+		if item.CurrentVariant == "" {
+			item.CurrentVariant = roomDefaultVariant(roomItem.Code, item.CurrentLevel)
 		}
 		items[roomItem.Code] = item
 	}
