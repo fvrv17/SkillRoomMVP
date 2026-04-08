@@ -27,6 +27,7 @@ type UserProfile struct {
 	SelectedTrack       string    `json:"selected_track"`
 	Bio                 string    `json:"bio,omitempty"`
 	AvatarURL           string    `json:"avatar_url,omitempty"`
+	LinkedInURL         string    `json:"linkedin_url,omitempty"`
 	CurrentSkillScore   float64   `json:"current_skill_score"`
 	PercentileGlobal    float64   `json:"percentile_global"`
 	PercentileCountry   float64   `json:"percentile_country"`
@@ -345,11 +346,28 @@ type CandidateSummary struct {
 	TasksCompleted  int       `json:"tasks_completed"`
 }
 
+type CandidateAccess struct {
+	IsUnlocked       bool       `json:"is_unlocked"`
+	UnlockRequired   bool       `json:"unlock_required"`
+	CanUnlock        bool       `json:"can_unlock"`
+	UnlockStatus     string     `json:"unlock_status,omitempty"`
+	UnlockSource     string     `json:"unlock_source,omitempty"`
+	UnlockedAt       *time.Time `json:"unlocked_at,omitempty"`
+	RemainingUnlocks int        `json:"remaining_unlocks"`
+	IsInvited        bool       `json:"is_invited"`
+	CanInvite        bool       `json:"can_invite"`
+	InviteStatus     string     `json:"invite_status,omitempty"`
+	InviteSource     string     `json:"invite_source,omitempty"`
+	InvitedAt        *time.Time `json:"invited_at,omitempty"`
+	RemainingInvites int        `json:"remaining_invites"`
+}
+
 type CandidateView struct {
 	Summary           CandidateSummary `json:"summary"`
 	UserID            string           `json:"user_id"`
 	Username          string           `json:"username"`
 	Country           string           `json:"country"`
+	Access            CandidateAccess  `json:"access"`
 	CurrentSkillScore float64          `json:"current_skill_score"`
 	PercentileGlobal  float64          `json:"percentile_global"`
 	ConfidenceScore   float64          `json:"confidence_score"`
@@ -360,6 +378,35 @@ type CandidateView struct {
 	RecentActivity    []string         `json:"recent_activity,omitempty"`
 	Strengths         []string         `json:"strengths,omitempty"`
 	Weaknesses        []string         `json:"weaknesses,omitempty"`
+}
+
+type CandidateContact struct {
+	Email       string `json:"email"`
+	LinkedInURL string `json:"linkedin_url,omitempty"`
+}
+
+type CandidateSubmissionSummary struct {
+	SubmissionID        string    `json:"submission_id"`
+	ChallengeInstanceID string    `json:"challenge_instance_id"`
+	TemplateID          string    `json:"template_id"`
+	TemplateTitle       string    `json:"template_title"`
+	Category            string    `json:"category"`
+	SubmittedAt         time.Time `json:"submitted_at"`
+	FinalScore          float64   `json:"final_score"`
+	QualityScore        float64   `json:"quality_score"`
+	ExecutionCostScore  float64   `json:"execution_cost_score"`
+	ExecutionStatus     string    `json:"execution_status"`
+}
+
+type CandidateDetailView struct {
+	Candidate         CandidateView                `json:"candidate"`
+	Contact           *CandidateContact            `json:"contact,omitempty"`
+	Profile           *UserProfile                 `json:"profile,omitempty"`
+	Skills            []UserSkill                  `json:"skills,omitempty"`
+	Room              []UserRoomItem               `json:"room,omitempty"`
+	RecentSubmissions []CandidateSubmissionSummary `json:"recent_submissions,omitempty"`
+	LockedFields      []string                     `json:"locked_fields,omitempty"`
+	Monetization      MonetizationSummary          `json:"monetization"`
 }
 
 type RankingEntry struct {

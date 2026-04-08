@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,6 +66,7 @@ type App struct {
 	plans             map[string]Plan
 	subscriptions     map[string]Subscription
 	candidateUnlocks  map[string]map[string]CandidateUnlock
+	candidateInvites  map[string]map[string]CandidateInvite
 	aiUsageEvents     map[string][]AIUsageEvent
 	cosmeticCatalog   map[string]CosmeticCatalogItem
 	userCosmetics     map[string]map[string]UserCosmetic
@@ -93,6 +95,10 @@ type AuthResponse struct {
 
 type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
+}
+
+type UpdateProfileRequest struct {
+	LinkedInURL string `json:"linkedin_url,omitempty"`
 }
 
 type StartChallengeRequest struct {
@@ -184,6 +190,7 @@ func NewApp(secret, issuer string) *App {
 		plans:             map[string]Plan{},
 		subscriptions:     map[string]Subscription{},
 		candidateUnlocks:  map[string]map[string]CandidateUnlock{},
+		candidateInvites:  map[string]map[string]CandidateInvite{},
 		aiUsageEvents:     map[string][]AIUsageEvent{},
 		cosmeticCatalog:   map[string]CosmeticCatalogItem{},
 		userCosmetics:     map[string]map[string]UserCosmetic{},
@@ -268,10 +275,17 @@ func (a *App) Router() http.Handler {
 			r.Use(a.requireAuth)
 			r.Use(a.rateLimitByUser("user-api", 240, time.Minute))
 			r.Get("/me", a.handleMe)
+			r.Get("/monetization/summary", a.handleMonetizationSummary)
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(a.requireAuth)
+			r.Use(a.requireRoles(RoleUser, RoleAdmin))
+			r.Use(a.rateLimitByUser("developer-api", 240, time.Minute))
 			r.Get("/profile", a.handleProfile)
+			r.Patch("/profile", a.handleUpdateProfile)
 			r.Get("/skills", a.handleSkills)
 			r.Get("/room", a.handleRoom)
-			r.Get("/monetization/summary", a.handleMonetizationSummary)
 			r.Get("/dev/cosmetics/catalog", a.handleListCosmeticCatalog)
 			r.Get("/dev/cosmetics/inventory", a.handleCosmeticInventory)
 			r.Get("/challenges/templates", a.handleListTemplates)
@@ -298,6 +312,10 @@ func (a *App) Router() http.Handler {
 			r.Post("/hr/companies", a.handleCreateCompany)
 			r.Post("/hr/companies/{companyID}/jobs", a.handleCreateJob)
 			r.Get("/hr/candidates", a.handleSearchCandidates)
+			r.Get("/hr/leaderboard", a.handleHRLeaderboard)
+			r.Get("/hr/candidates/{userID}", a.handleGetCandidateDetail)
+			r.Post("/hr/candidates/{userID}/unlock", a.handleUnlockCandidate)
+			r.Post("/hr/candidates/{userID}/invite", a.handleInviteCandidate)
 			r.Post("/hr/shortlists", a.handleShortlistCandidate)
 			r.With(a.rateLimitByUser("ai-mutation-preview", 30, time.Minute)).Post("/hr/ai/templates/{templateID}/mutation-preview", a.handleAIMutationPreview)
 		})
@@ -365,6 +383,25 @@ func (a *App) handleProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, a.profileView(user.ID))
+}
+
+func (a *App) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	user, err := a.authenticatedUser(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	var req UpdateProfileRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	profile, err := a.updateProfile(r.Context(), user.ID, req)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, profile)
 }
 
 func (a *App) handleSkills(w http.ResponseWriter, r *http.Request) {
@@ -680,13 +717,75 @@ func (a *App) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleSearchCandidates(w http.ResponseWriter, r *http.Request) {
+	user, err := a.authenticatedUser(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
 	minScore, _ := strconv.ParseFloat(r.URL.Query().Get("min_score"), 64)
 	topPercent, _ := strconv.ParseFloat(r.URL.Query().Get("top_percent"), 64)
 	activeDays, _ := strconv.Atoi(r.URL.Query().Get("active_days"))
 	minConfidence, _ := strconv.ParseFloat(r.URL.Query().Get("min_confidence"), 64)
+	results, monetization := a.searchCandidates(user.ID, minScore, minConfidence, topPercent, activeDays)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"candidates": a.searchCandidates(minScore, minConfidence, topPercent, activeDays),
+		"candidates":   results,
+		"monetization": monetization,
 	})
+}
+
+func (a *App) handleHRLeaderboard(w http.ResponseWriter, r *http.Request) {
+	user, err := a.authenticatedUser(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	results, monetization := a.searchCandidates(user.ID, 0, 0, 0, 0)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"rankings":     results,
+		"monetization": monetization,
+	})
+}
+
+func (a *App) handleGetCandidateDetail(w http.ResponseWriter, r *http.Request) {
+	user, err := a.authenticatedUser(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	detail, err := a.candidateDetail(r.Context(), user.ID, chi.URLParam(r, "userID"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, detail)
+}
+
+func (a *App) handleUnlockCandidate(w http.ResponseWriter, r *http.Request) {
+	user, err := a.authenticatedUser(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	detail, err := a.unlockCandidate(r.Context(), user.ID, chi.URLParam(r, "userID"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, detail)
+}
+
+func (a *App) handleInviteCandidate(w http.ResponseWriter, r *http.Request) {
+	user, err := a.authenticatedUser(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	detail, err := a.inviteCandidate(r.Context(), user.ID, chi.URLParam(r, "userID"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, detail)
 }
 
 func (a *App) handleShortlistCandidate(w http.ResponseWriter, r *http.Request) {
@@ -1573,6 +1672,62 @@ func (a *App) profileViewLocked(userID string) UserProfile {
 	return profile
 }
 
+func (a *App) updateProfile(ctx context.Context, userID string, req UpdateProfileRequest) (UserProfile, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	user, ok := a.users[userID]
+	if !ok {
+		return UserProfile{}, errors.New("user not found")
+	}
+	if !roleSupportsDeveloperRoom(user.Role) {
+		return UserProfile{}, errors.New("developer profile editing is unavailable for this role")
+	}
+
+	linkedInURL, err := normalizeLinkedInURL(req.LinkedInURL)
+	if err != nil {
+		return UserProfile{}, err
+	}
+
+	now := time.Now().UTC()
+	profile := user.Profile
+	profile.LinkedInURL = linkedInURL
+	profile.UpdatedAt = now
+	user.Profile = profile
+	user.LastActiveAt = now
+	a.users[userID] = user
+
+	if err := a.persistUserStateLocked(ctx, userID); err != nil {
+		return UserProfile{}, err
+	}
+	return a.profileViewLocked(userID), nil
+}
+
+func normalizeLinkedInURL(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(strings.ToLower(value), "http://") && !strings.HasPrefix(strings.ToLower(value), "https://") {
+		value = "https://" + value
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil {
+		return "", errors.New("linkedin_url must be a valid URL")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	host = strings.TrimPrefix(host, "www.")
+	if host != "linkedin.com" {
+		return "", errors.New("linkedin_url must point to linkedin.com")
+	}
+	if strings.TrimSpace(parsed.Path) == "" || parsed.Path == "/" {
+		return "", errors.New("linkedin_url must include a profile path")
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
 func (a *App) confidenceAssessmentLocked(userID string) evaluation.ConfidenceAssessment {
 	user, ok := a.users[userID]
 	if !ok {
@@ -1728,11 +1883,12 @@ func (a *App) createJob(ctx context.Context, ownerUserID, companyID string, req 
 	return job, nil
 }
 
-func (a *App) searchCandidates(minScore, minConfidence, topPercent float64, activeDays int) []CandidateView {
+func (a *App) searchCandidates(recruiterUserID string, minScore, minConfidence, topPercent float64, activeDays int) ([]CandidateView, MonetizationSummary) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	now := time.Now().UTC()
 	var out []CandidateView
+	monetization := a.monetizationSummaryLocked(recruiterUserID)
 	for _, user := range a.users {
 		if user.Role != RoleUser {
 			continue
@@ -1749,31 +1905,7 @@ func (a *App) searchCandidates(minScore, minConfidence, topPercent float64, acti
 		if activeDays > 0 && now.Sub(user.LastActiveAt) > time.Duration(activeDays)*24*time.Hour {
 			continue
 		}
-		profile := a.profileViewLocked(user.ID)
-		summary := CandidateSummary{
-			Score:           user.Profile.CurrentSkillScore,
-			Percentile:      user.Profile.PercentileGlobal,
-			ConfidenceScore: profile.ConfidenceScore,
-			ConfidenceLevel: profile.ConfidenceLevel,
-			LastActiveAt:    user.LastActiveAt,
-			TasksCompleted:  user.Profile.CompletedChallenges,
-		}
-		out = append(out, CandidateView{
-			Summary:           summary,
-			UserID:            user.ID,
-			Username:          user.Username,
-			Country:           user.Country,
-			CurrentSkillScore: user.Profile.CurrentSkillScore,
-			PercentileGlobal:  user.Profile.PercentileGlobal,
-			ConfidenceScore:   profile.ConfidenceScore,
-			ConfidenceLevel:   profile.ConfidenceLevel,
-			ConfidenceReasons: profile.ConfidenceReasons,
-			LastActiveAt:      user.LastActiveAt,
-			TasksSolved:       user.Profile.CompletedChallenges,
-			RecentActivity:    a.recentActivityLocked(user.ID),
-			Strengths:         a.skillSummaryLocked(user.ID, true),
-			Weaknesses:        a.skillSummaryLocked(user.ID, false),
-		})
+		out = append(out, a.candidatePreviewLocked(recruiterUserID, user, monetization))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CurrentSkillScore == out[j].CurrentSkillScore {
@@ -1784,7 +1916,7 @@ func (a *App) searchCandidates(minScore, minConfidence, topPercent float64, acti
 		}
 		return out[i].CurrentSkillScore > out[j].CurrentSkillScore
 	})
-	return out
+	return out, monetization
 }
 
 func (a *App) shortlistCandidate(ctx context.Context, ownerUserID string, req ShortlistRequest) (HRShortlist, error) {

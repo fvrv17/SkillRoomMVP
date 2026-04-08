@@ -39,6 +39,19 @@ func (s *SQLStore) UpsertCandidateUnlock(ctx context.Context, unlock CandidateUn
 	return err
 }
 
+func (s *SQLStore) UpsertCandidateInvite(ctx context.Context, invite CandidateInvite) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO candidate_invites (id, recruiter_user_id, candidate_user_id, source, status, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (recruiter_user_id, candidate_user_id) DO UPDATE SET
+			id = EXCLUDED.id,
+			source = EXCLUDED.source,
+			status = EXCLUDED.status,
+			created_at = EXCLUDED.created_at
+	`, invite.ID, invite.RecruiterUserID, invite.CandidateUserID, invite.Source, invite.Status, invite.CreatedAt)
+	return err
+}
+
 func (s *SQLStore) InsertAIUsageEvent(ctx context.Context, event AIUsageEvent) error {
 	contextJSON, err := marshalJSON(event.Context)
 	if err != nil {
@@ -120,6 +133,28 @@ func (s *SQLStore) loadCandidateUnlocks(ctx context.Context, app *App) error {
 			app.candidateUnlocks[unlock.RecruiterUserID] = map[string]CandidateUnlock{}
 		}
 		app.candidateUnlocks[unlock.RecruiterUserID][unlock.CandidateUserID] = unlock
+	}
+	return rows.Err()
+}
+
+func (s *SQLStore) loadCandidateInvites(ctx context.Context, app *App) error {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, recruiter_user_id, candidate_user_id, source, status, created_at
+		FROM candidate_invites
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var invite CandidateInvite
+		if err := rows.Scan(&invite.ID, &invite.RecruiterUserID, &invite.CandidateUserID, &invite.Source, &invite.Status, &invite.CreatedAt); err != nil {
+			return err
+		}
+		if _, ok := app.candidateInvites[invite.RecruiterUserID]; !ok {
+			app.candidateInvites[invite.RecruiterUserID] = map[string]CandidateInvite{}
+		}
+		app.candidateInvites[invite.RecruiterUserID][invite.CandidateUserID] = invite
 	}
 	return rows.Err()
 }

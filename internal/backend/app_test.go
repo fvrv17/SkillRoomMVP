@@ -364,12 +364,18 @@ func TestRankingsFriendChatAndHRSearch(t *testing.T) {
 	if searchResp.Code != http.StatusOK {
 		t.Fatalf("expected 200 search, got %d", searchResp.Code)
 	}
-	var candidates map[string][]CandidateView
+	var candidates struct {
+		Candidates   []CandidateView     `json:"candidates"`
+		Monetization MonetizationSummary `json:"monetization"`
+	}
 	if err := json.NewDecoder(searchResp.Body).Decode(&candidates); err != nil {
 		t.Fatalf("decode candidates: %v", err)
 	}
-	if len(candidates["candidates"]) < 3 {
-		t.Fatalf("expected candidates in HR search, got %d", len(candidates["candidates"]))
+	if len(candidates.Candidates) < 3 {
+		t.Fatalf("expected candidates in HR search, got %d", len(candidates.Candidates))
+	}
+	if candidates.Monetization.Plan.Code != planCodeHRFree {
+		t.Fatalf("expected hr free monetization summary, got %s", candidates.Monetization.Plan.Code)
 	}
 }
 

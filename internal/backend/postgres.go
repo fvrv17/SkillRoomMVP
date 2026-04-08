@@ -267,6 +267,9 @@ func (s *SQLStore) LoadInto(ctx context.Context, app *App) error {
 	if err := s.loadCandidateUnlocks(ctx, app); err != nil {
 		return err
 	}
+	if err := s.loadCandidateInvites(ctx, app); err != nil {
+		return err
+	}
 	if err := s.loadAIUsageEvents(ctx, app); err != nil {
 		return err
 	}
@@ -317,14 +320,15 @@ func (s *SQLStore) UpsertUserAggregate(ctx context.Context, user User, skills []
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO user_profiles (
-			user_id, selected_track, bio, avatar_url, current_skill_score, percentile_global, percentile_country,
+			user_id, selected_track, bio, avatar_url, linkedin_url, current_skill_score, percentile_global, percentile_country,
 			streak_days, confidence_score, completed_challenges, updated_at
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		ON CONFLICT (user_id) DO UPDATE SET
 			selected_track = EXCLUDED.selected_track,
 			bio = EXCLUDED.bio,
 			avatar_url = EXCLUDED.avatar_url,
+			linkedin_url = EXCLUDED.linkedin_url,
 			current_skill_score = EXCLUDED.current_skill_score,
 			percentile_global = EXCLUDED.percentile_global,
 			percentile_country = EXCLUDED.percentile_country,
@@ -332,7 +336,7 @@ func (s *SQLStore) UpsertUserAggregate(ctx context.Context, user User, skills []
 			confidence_score = EXCLUDED.confidence_score,
 			completed_challenges = EXCLUDED.completed_challenges,
 			updated_at = EXCLUDED.updated_at
-	`, user.Profile.UserID, user.Profile.SelectedTrack, user.Profile.Bio, user.Profile.AvatarURL, user.Profile.CurrentSkillScore,
+	`, user.Profile.UserID, user.Profile.SelectedTrack, user.Profile.Bio, user.Profile.AvatarURL, user.Profile.LinkedInURL, user.Profile.CurrentSkillScore,
 		user.Profile.PercentileGlobal, user.Profile.PercentileCountry, user.Profile.StreakDays, user.Profile.ConfidenceScore,
 		user.Profile.CompletedChallenges, user.Profile.UpdatedAt); err != nil {
 		return err
@@ -681,7 +685,7 @@ func (s *SQLStore) UpsertRankingSnapshot(ctx context.Context, rankingType, count
 func (s *SQLStore) loadUsers(ctx context.Context, app *App) error {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT u.id, u.email, u.username, u.password_hash, u.role, u.country, u.created_at, u.last_active_at,
-		       p.user_id, p.selected_track, p.bio, p.avatar_url, p.current_skill_score, p.percentile_global,
+		       p.user_id, p.selected_track, p.bio, p.avatar_url, p.linkedin_url, p.current_skill_score, p.percentile_global,
 		       p.percentile_country, p.streak_days, p.confidence_score, p.completed_challenges, p.updated_at
 		FROM users u
 		LEFT JOIN user_profiles p ON p.user_id = u.id
@@ -694,12 +698,12 @@ func (s *SQLStore) loadUsers(ctx context.Context, app *App) error {
 	for rows.Next() {
 		var user User
 		var role string
-		var profileUserID, selectedTrack, bio, avatarURL sql.NullString
+		var profileUserID, selectedTrack, bio, avatarURL, linkedInURL sql.NullString
 		var currentSkillScore, percentileGlobal, percentileCountry, confidenceScore sql.NullFloat64
 		var streakDays, completedChallenges sql.NullInt64
 		var profileUpdatedAt sql.NullTime
 		if err := rows.Scan(&user.ID, &user.Email, &user.Username, &user.PasswordHash, &role, &user.Country,
-			&user.CreatedAt, &user.LastActiveAt, &profileUserID, &selectedTrack, &bio, &avatarURL, &currentSkillScore,
+			&user.CreatedAt, &user.LastActiveAt, &profileUserID, &selectedTrack, &bio, &avatarURL, &linkedInURL, &currentSkillScore,
 			&percentileGlobal, &percentileCountry, &streakDays, &confidenceScore, &completedChallenges, &profileUpdatedAt); err != nil {
 			return err
 		}
@@ -719,6 +723,7 @@ func (s *SQLStore) loadUsers(ctx context.Context, app *App) error {
 			user.Profile.SelectedTrack = selectedTrack.String
 			user.Profile.Bio = bio.String
 			user.Profile.AvatarURL = avatarURL.String
+			user.Profile.LinkedInURL = linkedInURL.String
 			user.Profile.CurrentSkillScore = currentSkillScore.Float64
 			user.Profile.PercentileGlobal = percentileGlobal.Float64
 			user.Profile.PercentileCountry = percentileCountry.Float64

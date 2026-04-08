@@ -101,7 +101,7 @@ paths:
       tags: [Profile]
       security:
         - BearerAuth: []
-      summary: Get the current user profile
+      summary: Get the current developer profile
       responses:
         '200':
           description: Profile with score and confidence
@@ -112,6 +112,7 @@ paths:
               example:
                 user_id: usr_123
                 selected_track: react
+                linkedin_url: https://linkedin.com/in/candidate-one
                 current_skill_score: 612.4
                 percentile_global: 89
                 percentile_country: 83
@@ -123,6 +124,34 @@ paths:
                 completed_challenges: 8
                 updated_at: '2025-01-16T12:00:00Z'
         '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+    patch:
+      tags: [Profile]
+      security:
+        - BearerAuth: []
+      summary: Update the current developer profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+            example:
+              linkedin_url: https://linkedin.com/in/candidate-one
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
           $ref: '#/components/responses/ErrorResponse'
   /v1/skills:
     get:
@@ -611,6 +640,87 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/CandidateView'
+                  monetization:
+                    $ref: '#/components/schemas/MonetizationSummary'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/hr/candidates/{userID}:
+    get:
+      tags: [HR]
+      security:
+        - BearerAuth: []
+      summary: Get recruiter-facing candidate detail with unlock gating
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: Candidate preview or unlocked full detail depending recruiter access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateDetailView'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/hr/candidates/{userID}/unlock:
+    post:
+      tags: [HR]
+      security:
+        - BearerAuth: []
+      summary: Unlock a candidate's full profile and contact data
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '201':
+          description: Candidate unlocked and full detail returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateDetailView'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/hr/candidates/{userID}/invite:
+    post:
+      tags: [HR]
+      security:
+        - BearerAuth: []
+      summary: Invite an already-unlocked candidate
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '201':
+          description: Candidate marked as invited and updated detail returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateDetailView'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/hr/leaderboard:
+    get:
+      tags: [HR]
+      security:
+        - BearerAuth: []
+      summary: List recruiter-facing candidate leaderboard entries
+      responses:
+        '200':
+          description: Candidate leaderboard ordered by score, confidence, and recency
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rankings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CandidateView'
+                  monetization:
+                    $ref: '#/components/schemas/MonetizationSummary'
         '401':
           $ref: '#/components/responses/ErrorResponse'
   /v1/hr/companies:
@@ -811,6 +921,9 @@ components:
           type: string
         selected_track:
           type: string
+        linkedin_url:
+          type: string
+          format: uri
         current_skill_score:
           type: number
         percentile_global:
@@ -1477,6 +1590,8 @@ components:
           type: string
         country:
           type: string
+        access:
+          $ref: '#/components/schemas/CandidateAccess'
         current_skill_score:
           type: number
         percentile_global:
@@ -1506,12 +1621,111 @@ components:
           type: array
           items:
             type: string
+    CandidateAccess:
+      type: object
+      properties:
+        is_unlocked:
+          type: boolean
+        unlock_required:
+          type: boolean
+        can_unlock:
+          type: boolean
+        unlock_status:
+          type: string
+        unlock_source:
+          type: string
+        unlocked_at:
+          type: string
+          format: date-time
+        remaining_unlocks:
+          type: integer
+        is_invited:
+          type: boolean
+        can_invite:
+          type: boolean
+        invite_status:
+          type: string
+        invite_source:
+          type: string
+        invited_at:
+          type: string
+          format: date-time
+        remaining_invites:
+          type: integer
+    CandidateContact:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        linkedin_url:
+          type: string
+          format: uri
+    UpdateProfileRequest:
+      type: object
+      properties:
+        linkedin_url:
+          type: string
+          format: uri
+    CandidateSubmissionSummary:
+      type: object
+      properties:
+        submission_id:
+          type: string
+        challenge_instance_id:
+          type: string
+        template_id:
+          type: string
+        template_title:
+          type: string
+        category:
+          type: string
+        submitted_at:
+          type: string
+          format: date-time
+        final_score:
+          type: number
+        quality_score:
+          type: number
+        execution_cost_score:
+          type: number
+        execution_status:
+          type: string
+    CandidateDetailView:
+      type: object
+      properties:
+        candidate:
+          $ref: '#/components/schemas/CandidateView'
+        contact:
+          $ref: '#/components/schemas/CandidateContact'
+        profile:
+          $ref: '#/components/schemas/UserProfile'
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSkill'
+        room:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserRoomItem'
+        recent_submissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CandidateSubmissionSummary'
+        locked_fields:
+          type: array
+          items:
+            type: string
+        monetization:
+          $ref: '#/components/schemas/MonetizationSummary'
     PlanEntitlements:
       type: object
       properties:
         candidate_preview:
           type: boolean
         candidate_unlocks_per_month:
+          type: integer
+        candidate_invites_per_month:
           type: integer
         hr_ai_actions_per_month:
           type: integer
@@ -1593,6 +1807,8 @@ components:
           type: string
           format: date-time
         candidate_unlocks_used:
+          type: integer
+        candidate_invites_used:
           type: integer
         hr_ai_actions_used:
           type: integer

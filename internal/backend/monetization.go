@@ -135,6 +135,7 @@ func defaultPlans() []Plan {
 			Entitlements: PlanEntitlements{
 				CandidatePreview:         true,
 				CandidateUnlocksPerMonth: 3,
+				CandidateInvitesPerMonth: 2,
 				HRAIActionsPerMonth:      10,
 			},
 		},
@@ -151,6 +152,7 @@ func defaultPlans() []Plan {
 			Entitlements: PlanEntitlements{
 				CandidatePreview:         true,
 				CandidateUnlocksPerMonth: 40,
+				CandidateInvitesPerMonth: 25,
 				HRAIActionsPerMonth:      150,
 				HRAdvancedFilters:        true,
 				BusinessSeats:            1,
@@ -169,6 +171,7 @@ func defaultPlans() []Plan {
 			Entitlements: PlanEntitlements{
 				CandidatePreview:         true,
 				CandidateUnlocksPerMonth: 250,
+				CandidateInvitesPerMonth: 150,
 				HRAIActionsPerMonth:      1000,
 				HRAdvancedFilters:        true,
 				BusinessSeats:            25,
@@ -187,6 +190,7 @@ func defaultPlans() []Plan {
 			Entitlements: PlanEntitlements{
 				CandidatePreview:         true,
 				CandidateUnlocksPerMonth: 10000,
+				CandidateInvitesPerMonth: 10000,
 				HRAIActionsPerMonth:      10000,
 				HRAdvancedFilters:        true,
 				BusinessSeats:            999,
@@ -416,6 +420,11 @@ func (a *App) usageForSubscriptionPeriodLocked(userID string, subscription Subsc
 			usage.CandidateUnlocksUsed++
 		}
 	}
+	for _, invite := range a.candidateInvites[userID] {
+		if !invite.CreatedAt.Before(subscription.CurrentPeriodStart) && invite.CreatedAt.Before(subscription.CurrentPeriodEnd) {
+			usage.CandidateInvitesUsed++
+		}
+	}
 	for _, event := range a.aiUsageEvents[userID] {
 		if event.CreatedAt.Before(subscription.CurrentPeriodStart) || !event.CreatedAt.Before(subscription.CurrentPeriodEnd) {
 			continue
@@ -503,6 +512,268 @@ func (a *App) recordAIUsage(ctx context.Context, event AIUsageEvent) error {
 	return a.persistAIUsageLocked(ctx, event)
 }
 
+func (a *App) candidateDetail(ctx context.Context, recruiterUserID, candidateUserID string) (CandidateDetailView, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	recruiter, ok := a.users[recruiterUserID]
+	if !ok || (recruiter.Role != RoleHR && recruiter.Role != RoleAdmin) {
+		return CandidateDetailView{}, errors.New("recruiter not found")
+	}
+	candidate, ok := a.users[candidateUserID]
+	if !ok || candidate.Role != RoleUser {
+		return CandidateDetailView{}, errors.New("candidate not found")
+	}
+	monetization := a.monetizationSummaryLocked(recruiterUserID)
+	preview := a.candidatePreviewLocked(recruiterUserID, candidate, monetization)
+	detail := CandidateDetailView{
+		Candidate:    preview,
+		LockedFields: []string{"contact", "linkedin", "profile", "skills", "room", "recent_submissions"},
+		Monetization: monetization,
+	}
+	if !preview.Access.IsUnlocked {
+		return detail, nil
+	}
+	profileCopy := a.profileViewLocked(candidate.ID)
+	detail.Contact = &CandidateContact{Email: candidate.Email, LinkedInURL: profileCopy.LinkedInURL}
+	detail.Profile = &profileCopy
+	detail.Skills = a.listUserSkillsLocked(candidate.ID)
+	detail.Room = a.listUserRoomItemsLocked(candidate.ID)
+	detail.RecentSubmissions = a.candidateRecentSubmissionsLocked(candidate.ID)
+	detail.LockedFields = nil
+	return detail, nil
+}
+
+func (a *App) unlockCandidate(ctx context.Context, recruiterUserID, candidateUserID string) (CandidateDetailView, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	recruiter, ok := a.users[recruiterUserID]
+	if !ok || (recruiter.Role != RoleHR && recruiter.Role != RoleAdmin) {
+		return CandidateDetailView{}, errors.New("recruiter not found")
+	}
+	candidate, ok := a.users[candidateUserID]
+	if !ok || candidate.Role != RoleUser {
+		return CandidateDetailView{}, errors.New("candidate not found")
+	}
+	if recruiterUserID == candidateUserID {
+		return CandidateDetailView{}, errors.New("cannot unlock your own candidate card")
+	}
+
+	monetization := a.monetizationSummaryLocked(recruiterUserID)
+	access := a.candidateAccessLocked(recruiterUserID, candidateUserID, monetization)
+	if access.IsUnlocked {
+		return a.candidateDetailLocked(recruiterUserID, candidate, monetization), nil
+	}
+	if !access.CanUnlock {
+		if access.RemainingUnlocks <= 0 {
+			return CandidateDetailView{}, errors.New("candidate unlock limit reached for current plan")
+		}
+		return CandidateDetailView{}, errors.New("candidate unlocks are unavailable for current plan")
+	}
+
+	now := time.Now().UTC()
+	unlock := CandidateUnlock{
+		ID:              id.New("cul"),
+		RecruiterUserID: recruiterUserID,
+		CandidateUserID: candidateUserID,
+		Source:          "plan_credit",
+		Status:          "active",
+		CreatedAt:       now,
+	}
+	if _, ok := a.candidateUnlocks[recruiterUserID]; !ok {
+		a.candidateUnlocks[recruiterUserID] = map[string]CandidateUnlock{}
+	}
+	a.candidateUnlocks[recruiterUserID][candidateUserID] = unlock
+	if err := a.persistCandidateUnlockLocked(ctx, unlock); err != nil {
+		return CandidateDetailView{}, err
+	}
+
+	updatedMonetization := a.monetizationSummaryLocked(recruiterUserID)
+	return a.candidateDetailLocked(recruiterUserID, candidate, updatedMonetization), nil
+}
+
+func (a *App) inviteCandidate(ctx context.Context, recruiterUserID, candidateUserID string) (CandidateDetailView, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	recruiter, ok := a.users[recruiterUserID]
+	if !ok || (recruiter.Role != RoleHR && recruiter.Role != RoleAdmin) {
+		return CandidateDetailView{}, errors.New("recruiter not found")
+	}
+	candidate, ok := a.users[candidateUserID]
+	if !ok || candidate.Role != RoleUser {
+		return CandidateDetailView{}, errors.New("candidate not found")
+	}
+	monetization := a.monetizationSummaryLocked(recruiterUserID)
+	access := a.candidateAccessLocked(recruiterUserID, candidateUserID, monetization)
+	if !access.IsUnlocked {
+		return CandidateDetailView{}, errors.New("candidate must be unlocked before inviting")
+	}
+	if access.IsInvited {
+		return a.candidateDetailLocked(recruiterUserID, candidate, monetization), nil
+	}
+	if !access.CanInvite {
+		if access.RemainingInvites <= 0 {
+			return CandidateDetailView{}, errors.New("candidate invite limit reached for current plan")
+		}
+		return CandidateDetailView{}, errors.New("candidate invites are unavailable for current plan")
+	}
+
+	now := time.Now().UTC()
+	invite := CandidateInvite{
+		ID:              id.New("cin"),
+		RecruiterUserID: recruiterUserID,
+		CandidateUserID: candidateUserID,
+		Source:          "plan_credit",
+		Status:          "invited",
+		CreatedAt:       now,
+	}
+	if _, ok := a.candidateInvites[recruiterUserID]; !ok {
+		a.candidateInvites[recruiterUserID] = map[string]CandidateInvite{}
+	}
+	a.candidateInvites[recruiterUserID][candidateUserID] = invite
+	if err := a.persistCandidateInviteLocked(ctx, invite); err != nil {
+		return CandidateDetailView{}, err
+	}
+
+	updatedMonetization := a.monetizationSummaryLocked(recruiterUserID)
+	return a.candidateDetailLocked(recruiterUserID, candidate, updatedMonetization), nil
+}
+
+func (a *App) candidateDetailLocked(recruiterUserID string, candidate User, monetization MonetizationSummary) CandidateDetailView {
+	preview := a.candidatePreviewLocked(recruiterUserID, candidate, monetization)
+	detail := CandidateDetailView{
+		Candidate:    preview,
+		Monetization: monetization,
+	}
+	if !preview.Access.IsUnlocked {
+		detail.LockedFields = []string{"contact", "linkedin", "profile", "skills", "room", "recent_submissions"}
+		return detail
+	}
+	profile := a.profileViewLocked(candidate.ID)
+	detail.Contact = &CandidateContact{Email: candidate.Email, LinkedInURL: profile.LinkedInURL}
+	detail.Profile = &profile
+	detail.Skills = a.listUserSkillsLocked(candidate.ID)
+	detail.Room = a.listUserRoomItemsLocked(candidate.ID)
+	detail.RecentSubmissions = a.candidateRecentSubmissionsLocked(candidate.ID)
+	return detail
+}
+
+func (a *App) candidatePreviewLocked(recruiterUserID string, user User, monetization MonetizationSummary) CandidateView {
+	profile := a.profileViewLocked(user.ID)
+	summary := CandidateSummary{
+		Score:           user.Profile.CurrentSkillScore,
+		Percentile:      user.Profile.PercentileGlobal,
+		ConfidenceScore: profile.ConfidenceScore,
+		ConfidenceLevel: profile.ConfidenceLevel,
+		LastActiveAt:    user.LastActiveAt,
+		TasksCompleted:  user.Profile.CompletedChallenges,
+	}
+	return CandidateView{
+		Summary:           summary,
+		UserID:            user.ID,
+		Username:          user.Username,
+		Country:           user.Country,
+		Access:            a.candidateAccessLocked(recruiterUserID, user.ID, monetization),
+		CurrentSkillScore: user.Profile.CurrentSkillScore,
+		PercentileGlobal:  user.Profile.PercentileGlobal,
+		ConfidenceScore:   profile.ConfidenceScore,
+		ConfidenceLevel:   profile.ConfidenceLevel,
+		ConfidenceReasons: profile.ConfidenceReasons,
+		LastActiveAt:      user.LastActiveAt,
+		TasksSolved:       user.Profile.CompletedChallenges,
+		RecentActivity:    a.recentActivityLocked(user.ID),
+		Strengths:         a.skillSummaryLocked(user.ID, true),
+		Weaknesses:        a.skillSummaryLocked(user.ID, false),
+	}
+}
+
+func (a *App) candidateAccessLocked(recruiterUserID, candidateUserID string, monetization MonetizationSummary) CandidateAccess {
+	unlock, unlocked := CandidateUnlock{}, false
+	if entries, ok := a.candidateUnlocks[recruiterUserID]; ok {
+		unlock, unlocked = entries[candidateUserID]
+	}
+	invite, invited := CandidateInvite{}, false
+	if entries, ok := a.candidateInvites[recruiterUserID]; ok {
+		invite, invited = entries[candidateUserID]
+	}
+	remaining := monetization.Entitlements.CandidateUnlocksPerMonth - monetization.Usage.CandidateUnlocksUsed
+	if monetization.Entitlements.CandidateUnlocksPerMonth <= 0 {
+		remaining = 0
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	remainingInvites := monetization.Entitlements.CandidateInvitesPerMonth - monetization.Usage.CandidateInvitesUsed
+	if monetization.Entitlements.CandidateInvitesPerMonth <= 0 {
+		remainingInvites = 0
+	}
+	if remainingInvites < 0 {
+		remainingInvites = 0
+	}
+	var unlockedAt *time.Time
+	if unlocked {
+		timeCopy := unlock.CreatedAt
+		unlockedAt = &timeCopy
+	}
+	var invitedAt *time.Time
+	if invited {
+		timeCopy := invite.CreatedAt
+		invitedAt = &timeCopy
+	}
+	return CandidateAccess{
+		IsUnlocked:       unlocked,
+		UnlockRequired:   !unlocked,
+		CanUnlock:        unlocked || remaining > 0,
+		UnlockStatus:     firstNonEmpty(unlock.Status, "locked"),
+		UnlockSource:     unlock.Source,
+		UnlockedAt:       unlockedAt,
+		RemainingUnlocks: remaining,
+		IsInvited:        invited,
+		CanInvite:        invited || (unlocked && remainingInvites > 0),
+		InviteStatus:     firstNonEmpty(invite.Status, "not_invited"),
+		InviteSource:     invite.Source,
+		InvitedAt:        invitedAt,
+		RemainingInvites: remainingInvites,
+	}
+}
+
+func (a *App) candidateRecentSubmissionsLocked(userID string) []CandidateSubmissionSummary {
+	summaries := make([]CandidateSubmissionSummary, 0)
+	for _, instance := range a.instances {
+		if instance.UserID != userID {
+			continue
+		}
+		for _, submission := range a.submissions {
+			if submission.ChallengeInstanceID != instance.ID {
+				continue
+			}
+			evaluation := a.evaluations[submission.ID]
+			template := a.templates[instance.TemplateID]
+			summaries = append(summaries, CandidateSubmissionSummary{
+				SubmissionID:        submission.ID,
+				ChallengeInstanceID: submission.ChallengeInstanceID,
+				TemplateID:          instance.TemplateID,
+				TemplateTitle:       template.Title,
+				Category:            template.Category,
+				SubmittedAt:         submission.SubmittedAt,
+				FinalScore:          evaluation.FinalScore,
+				QualityScore:        evaluation.QualityScore,
+				ExecutionCostScore:  firstNonZeroFloat(evaluation.ExecutionCostScore, evaluation.SpeedScore),
+				ExecutionStatus:     submission.ExecutionStatus,
+			})
+		}
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].SubmittedAt.After(summaries[j].SubmittedAt)
+	})
+	if len(summaries) > 8 {
+		summaries = summaries[:8]
+	}
+	return summaries
+}
+
 func (a *App) persistUserMonetizationLocked(ctx context.Context, userID string) error {
 	if a.store == nil {
 		return nil
@@ -535,6 +806,20 @@ func (a *App) persistAIUsageLocked(ctx context.Context, event AIUsageEvent) erro
 		return nil
 	}
 	return a.store.InsertAIUsageEvent(ctx, event)
+}
+
+func (a *App) persistCandidateUnlockLocked(ctx context.Context, unlock CandidateUnlock) error {
+	if a.store == nil {
+		return nil
+	}
+	return a.store.UpsertCandidateUnlock(ctx, unlock)
+}
+
+func (a *App) persistCandidateInviteLocked(ctx context.Context, invite CandidateInvite) error {
+	if a.store == nil {
+		return nil
+	}
+	return a.store.UpsertCandidateInvite(ctx, invite)
 }
 
 func usageUnits(units int) int {

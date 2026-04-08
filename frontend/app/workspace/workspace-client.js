@@ -18,12 +18,17 @@ import {
   normalizeWindowScene,
 } from "@/lib/room-scene-config";
 
-const NAV_ITEMS = [
+const DEVELOPER_NAV_ITEMS = [
   { id: "overview", label: "Overview" },
   { id: "challenges", label: "Challenges" },
   { id: "room", label: "Room" },
   { id: "ranking", label: "Ranking" },
-  { id: "hr", label: "HR view" },
+];
+
+const HR_NAV_ITEMS = [
+  { id: "overview", label: "Overview" },
+  { id: "candidates", label: "Candidates" },
+  { id: "leaderboard", label: "Leaderboard" },
 ];
 
 export default function WorkspaceClient() {
@@ -44,6 +49,8 @@ export default function WorkspaceClient() {
     rankings: [],
     templates: [],
     candidates: [],
+    leaderboard: [],
+    monetization: null,
   });
   const [currentChallenge, setCurrentChallenge] = useState(null);
   const [activeFile, setActiveFile] = useState("");
@@ -53,6 +60,10 @@ export default function WorkspaceClient() {
   const [explanationResult, setExplanationResult] = useState(null);
   const [busyAction, setBusyAction] = useState("");
   const [selectedRoomCode, setSelectedRoomCode] = useState("");
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [selectedCandidateRoomCode, setSelectedCandidateRoomCode] = useState("");
+  const [linkedInDraft, setLinkedInDraft] = useState("");
+  const [profileNotice, setProfileNotice] = useState("");
   const roomThemeID = ROOM_DEFAULT_THEME_ID;
   const windowSceneID = ROOM_DEFAULT_WINDOW_SCENE_ID;
 
@@ -88,8 +99,11 @@ export default function WorkspaceClient() {
   const templates = data.templates || [];
   const rankings = data.rankings || [];
   const candidates = data.candidates || [];
+  const leaderboard = data.leaderboard || [];
+  const monetization = data.monetization || null;
   const token = session?.auth?.access_token || "";
-  const allowedNav = NAV_ITEMS.filter((item) => user.role === "hr" || item.id !== "hr");
+  const isHR = user.role === "hr";
+  const allowedNav = useMemo(() => (isHR ? HR_NAV_ITEMS : DEVELOPER_NAV_ITEMS), [isHR]);
   const editableFiles = currentChallenge?.editableFiles || [];
   const editorFiles = currentChallenge?.files || {};
   const visibleTests = currentChallenge?.visibleTests || {};
@@ -102,6 +116,15 @@ export default function WorkspaceClient() {
   );
   const selectedRoomItem = orderedRoomItems.find((item) => item.room_item_code === selectedRoomCode) || orderedRoomItems[0] || null;
   const selectedRoomSlot = selectedRoomItem ? ROOM_SCENE_SLOTS[selectedRoomItem.room_item_code] : null;
+  const candidateRoomItems = selectedCandidate?.room || [];
+  const orderedCandidateRoomItems = useMemo(
+    () =>
+      ROOM_SCENE_ORDER.map((code) => candidateRoomItems.find((item) => item.room_item_code === code)).filter(Boolean),
+    [candidateRoomItems],
+  );
+  const selectedCandidateRoomItem =
+    orderedCandidateRoomItems.find((item) => item.room_item_code === selectedCandidateRoomCode) || orderedCandidateRoomItems[0] || null;
+  const selectedCandidateRoomSlot = selectedCandidateRoomItem ? ROOM_SCENE_SLOTS[selectedCandidateRoomItem.room_item_code] : null;
 
   useEffect(() => {
     if (orderedRoomItems.length === 0) {
@@ -115,38 +138,87 @@ export default function WorkspaceClient() {
     }
   }, [orderedRoomItems, selectedRoomCode]);
 
+  useEffect(() => {
+    if (orderedCandidateRoomItems.length === 0) {
+      if (selectedCandidateRoomCode) {
+        setSelectedCandidateRoomCode("");
+      }
+      return;
+    }
+    if (!orderedCandidateRoomItems.some((item) => item.room_item_code === selectedCandidateRoomCode)) {
+      setSelectedCandidateRoomCode(orderedCandidateRoomItems[0].room_item_code);
+    }
+  }, [orderedCandidateRoomItems, selectedCandidateRoomCode]);
+
+  useEffect(() => {
+    if (isHR) {
+      setLinkedInDraft("");
+      setProfileNotice("");
+      return;
+    }
+    setLinkedInDraft(profile.linkedin_url || "");
+  }, [isHR, profile.linkedin_url]);
+
+  useEffect(() => {
+    if (allowedNav.length === 0) {
+      return;
+    }
+    if (isHR && activeView === "candidate-room") {
+      return;
+    }
+    if (!allowedNav.some((item) => item.id === activeView)) {
+      setActiveView(allowedNav[0].id);
+    }
+  }, [activeView, allowedNav, isHR]);
+
   async function loadWorkspace(currentSession) {
     setLoading(true);
     setError("");
+    setProfileNotice("");
 
     try {
       if (!currentSession.auth?.access_token) {
         return;
       }
 
-      const [me, profilePayload, skillsPayload, roomPayload, templatesPayload, rankingPayload] = await Promise.all([
-        apiFetch("/v1/me", { token: currentSession.auth.access_token }),
-        apiFetch("/v1/profile", { token: currentSession.auth.access_token }),
-        apiFetch("/v1/skills", { token: currentSession.auth.access_token }),
-        apiFetch("/v1/room", { token: currentSession.auth.access_token }),
-        apiFetch("/v1/challenges/templates", { token: currentSession.auth.access_token }),
-        apiFetch("/v1/rankings/global", { token: currentSession.auth.access_token }),
-      ]);
-
-      let candidatePayload = { candidates: [] };
+      const me = await apiFetch("/v1/me", { token: currentSession.auth.access_token });
       if (me.role === "hr") {
-        candidatePayload = await fetchCandidates(currentSession.auth.access_token, filters);
+        const [candidatePayload, leaderboardPayload] = await Promise.all([
+          fetchCandidates(currentSession.auth.access_token, filters),
+          fetchHRLeaderboard(currentSession.auth.access_token),
+        ]);
+        setData({
+          user: me,
+          profile: null,
+          skills: [],
+          room: [],
+          rankings: [],
+          templates: [],
+          candidates: candidatePayload.candidates || [],
+          leaderboard: leaderboardPayload.rankings || [],
+          monetization: candidatePayload.monetization || leaderboardPayload.monetization || null,
+        });
+      } else {
+        const [profilePayload, skillsPayload, roomPayload, templatesPayload, rankingPayload] = await Promise.all([
+          apiFetch("/v1/profile", { token: currentSession.auth.access_token }),
+          apiFetch("/v1/skills", { token: currentSession.auth.access_token }),
+          apiFetch("/v1/room", { token: currentSession.auth.access_token }),
+          apiFetch("/v1/challenges/templates", { token: currentSession.auth.access_token }),
+          apiFetch("/v1/rankings/global", { token: currentSession.auth.access_token }),
+        ]);
+        setData({
+          user: me,
+          profile: profilePayload,
+          skills: skillsPayload.skills || [],
+          room: roomPayload.items || [],
+          rankings: rankingPayload.rankings || [],
+          templates: templatesPayload.templates || [],
+          candidates: [],
+          leaderboard: [],
+          monetization: null,
+        });
       }
-
-      setData({
-        user: me,
-        profile: profilePayload,
-        skills: skillsPayload.skills || [],
-        room: roomPayload.items || [],
-        rankings: rankingPayload.rankings || [],
-        templates: templatesPayload.templates || [],
-        candidates: candidatePayload.candidates || [],
-      });
+      setSelectedCandidate(null);
       setActiveView(defaultView(me.role));
     } catch (loadError) {
       if (isUnauthorizedError(loadError)) {
@@ -165,9 +237,16 @@ export default function WorkspaceClient() {
     }
     const rankingPayload = await apiFetch("/v1/rankings/global", { token });
     let nextCandidates = data.candidates;
+    let nextLeaderboard = data.leaderboard;
+    let nextMonetization = data.monetization;
     if (user.role === "hr") {
-      const candidatePayload = await fetchCandidates(token, filters);
+      const [candidatePayload, leaderboardPayload] = await Promise.all([
+        fetchCandidates(token, filters),
+        fetchHRLeaderboard(token),
+      ]);
       nextCandidates = candidatePayload.candidates || [];
+      nextLeaderboard = leaderboardPayload.rankings || [];
+      nextMonetization = candidatePayload.monetization || leaderboardPayload.monetization || null;
     }
     setData((current) => ({
       ...current,
@@ -176,6 +255,8 @@ export default function WorkspaceClient() {
       room: roomPayload,
       rankings: rankingPayload.rankings || [],
       candidates: nextCandidates,
+      leaderboard: nextLeaderboard,
+      monetization: nextMonetization,
     }));
   }
 
@@ -188,9 +269,141 @@ export default function WorkspaceClient() {
     setError("");
     try {
       const candidatePayload = await fetchCandidates(token, filters);
-      setData((current) => ({ ...current, candidates: candidatePayload.candidates || [] }));
+      setData((current) => ({
+        ...current,
+        candidates: candidatePayload.candidates || [],
+        monetization: candidatePayload.monetization || current.monetization,
+      }));
+      setSelectedCandidate(null);
     } catch (candidateError) {
       setError(candidateError instanceof Error ? candidateError.message : "Unable to load candidates");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleOpenCandidate(userID) {
+    if (!token || user.role !== "hr") {
+      return;
+    }
+    setBusyAction(`candidate:${userID}`);
+    setError("");
+    try {
+      const payload = await fetchCandidateDetail(token, userID);
+      setSelectedCandidate(payload);
+      setSelectedCandidateRoomCode("");
+      setData((current) => ({
+        ...current,
+        monetization: payload.monetization || current.monetization,
+      }));
+    } catch (candidateError) {
+      setError(candidateError instanceof Error ? candidateError.message : "Unable to load candidate detail");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleUnlockCandidate(userID) {
+    if (!token || user.role !== "hr") {
+      return;
+    }
+    setBusyAction(`unlock:${userID}`);
+    setError("");
+    try {
+      const payload = await unlockCandidate(token, userID);
+      setSelectedCandidate(payload);
+      const [candidatePayload, leaderboardPayload] = await Promise.all([
+        fetchCandidates(token, filters),
+        fetchHRLeaderboard(token),
+      ]);
+      setData((current) => ({
+        ...current,
+        candidates: candidatePayload.candidates || current.candidates,
+        leaderboard: leaderboardPayload.rankings || current.leaderboard,
+        monetization: payload.monetization || candidatePayload.monetization || leaderboardPayload.monetization || current.monetization,
+      }));
+    } catch (unlockError) {
+      setError(unlockError instanceof Error ? unlockError.message : "Unable to unlock candidate");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleInviteCandidate(userID) {
+    if (!token || user.role !== "hr") {
+      return;
+    }
+    setBusyAction(`invite:${userID}`);
+    setError("");
+    try {
+      const payload = await inviteCandidate(token, userID);
+      setSelectedCandidate(payload);
+      const [candidatePayload, leaderboardPayload] = await Promise.all([
+        fetchCandidates(token, filters),
+        fetchHRLeaderboard(token),
+      ]);
+      setData((current) => ({
+        ...current,
+        candidates: candidatePayload.candidates || current.candidates,
+        leaderboard: leaderboardPayload.rankings || current.leaderboard,
+        monetization: payload.monetization || candidatePayload.monetization || leaderboardPayload.monetization || current.monetization,
+      }));
+    } catch (inviteError) {
+      setError(inviteError instanceof Error ? inviteError.message : "Unable to invite candidate");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleOpenCandidateRoom(userID) {
+    if (!token || user.role !== "hr") {
+      return;
+    }
+    setBusyAction(`room:${userID}`);
+    setError("");
+    try {
+      const payload = await fetchCandidateDetail(token, userID);
+      setSelectedCandidate(payload);
+      setSelectedCandidateRoomCode("");
+      setData((current) => ({
+        ...current,
+        monetization: payload.monetization || current.monetization,
+      }));
+      setActiveView("candidate-room");
+    } catch (roomError) {
+      setError(roomError instanceof Error ? roomError.message : "Unable to load candidate room");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleSaveProfile() {
+    if (!token || isHR) {
+      return;
+    }
+    setBusyAction("profile");
+    setError("");
+    setProfileNotice("");
+    try {
+      const payload = await apiFetch("/v1/profile", {
+        method: "PATCH",
+        token,
+        body: {
+          linkedin_url: linkedInDraft,
+        },
+      });
+      setData((current) => ({
+        ...current,
+        profile: payload,
+        user: {
+          ...(current.user || {}),
+          profile: payload,
+        },
+      }));
+      setLinkedInDraft(payload.linkedin_url || "");
+      setProfileNotice("LinkedIn profile saved.");
+    } catch (profileError) {
+      setError(profileError instanceof Error ? profileError.message : "Unable to save profile");
     } finally {
       setBusyAction("");
     }
@@ -404,7 +617,13 @@ export default function WorkspaceClient() {
         </div>
         <div className="workspace-meta">
           <span className="meta-pill">{session?.region?.label || "Americas"}</span>
-          <span className="meta-pill">{`Confidence ${formatNumber(profile.confidence_score)}`}</span>
+          {isHR ? (
+            <span className="meta-pill">
+              {`${Math.max((monetization?.entitlements?.candidate_unlocks_per_month || 0) - (monetization?.usage?.candidate_unlocks_used || 0), 0)} unlocks left`}
+            </span>
+          ) : (
+            <span className="meta-pill">{`Confidence ${formatNumber(profile.confidence_score)}`}</span>
+          )}
           <button type="button" className="secondary-button" onClick={handleSignOut}>
             Sign out
           </button>
@@ -428,43 +647,134 @@ export default function WorkspaceClient() {
 
       {activeView === "overview" ? (
         <section className="workspace-grid workspace-grid--overview">
-          <div className="card stats-card">
-            <p className="eyebrow">Skill score</p>
-            <h2>{formatNumber(profile.current_skill_score)}</h2>
-            <div className="stats-row">
-              <Stat label="Confidence" value={formatNumber(profile.confidence_score)} />
-              <Stat label="Global %" value={formatNumber(profile.percentile_global)} />
-              <Stat label="Solved" value={profile.completed_challenges || 0} />
-            </div>
-          </div>
-          <div className="card">
-            <p className="eyebrow">Skill distribution</p>
-            <div className="skill-list">
-              {skills.map((skill) => (
-                <div key={skill.skill_code} className="skill-item">
-                  <div className="skill-row">
-                    <div className="skill-meta">
-                      <span className="skill-name">{labelize(skill.skill_code)}</span>
-                      <span className={`skill-level ${levelClass(skill.level)}`}>{skill.level}</span>
-                    </div>
-                    <strong>{formatNumber(skill.score)}</strong>
+          {isHR ? (
+            <>
+              <div className="card stats-card">
+                <p className="eyebrow">Recruiter plan</p>
+                <h2>{labelize(monetization?.plan?.tier || "free")}</h2>
+                <div className="stats-row">
+                  <Stat label="Unlocks used" value={monetization?.usage?.candidate_unlocks_used || 0} />
+                  <Stat
+                    label="Unlocks left"
+                    value={Math.max((monetization?.entitlements?.candidate_unlocks_per_month || 0) - (monetization?.usage?.candidate_unlocks_used || 0), 0)}
+                  />
+                  <Stat
+                    label="Invites left"
+                    value={Math.max((monetization?.entitlements?.candidate_invites_per_month || 0) - (monetization?.usage?.candidate_invites_used || 0), 0)}
+                  />
+                </div>
+              </div>
+              <div className="card">
+                <p className="eyebrow">Recruiter workspace</p>
+                <h3>Review candidates, unlock full profiles, and inspect candidate rooms.</h3>
+                <ul className="plain-list">
+                  <li>Developer challenges and rankings are hidden from recruiter accounts.</li>
+                  <li>Candidate room state appears only inside unlocked candidate detail.</li>
+                  <li>Unlocks are enforced by your active HR plan.</li>
+                </ul>
+                <div className="action-row action-row--compact">
+                  <button type="button" className="primary-button" onClick={() => setActiveView("leaderboard")}>
+                    Open leaderboard
+                  </button>
+                  <button type="button" className="secondary-button" onClick={() => setActiveView("candidates")}>
+                    Open candidates
+                  </button>
+                </div>
+              </div>
+              <div className="card card--span-2">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">Top candidates</p>
+                    <h3>Leaderboard preview</h3>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-          <div className="card card--span-2">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Room state</p>
-                <h3>Items move with real skill data</h3>
+                <div className="ranking-table">
+                  <div className="ranking-row ranking-row--header">
+                    <span>Rank</span>
+                    <span>User</span>
+                    <span>Score</span>
+                    <span>Confidence</span>
+                    <span>Status</span>
+                    <span>Action</span>
+                  </div>
+                  {leaderboard.slice(0, 5).map((candidate, index) => (
+                    <div key={`${candidate.user_id}-${index}`} className="ranking-row">
+                      <span>#{index + 1}</span>
+                      <span>{candidate.username}</span>
+                      <span>{formatNumber(candidate.summary?.score ?? candidate.current_skill_score)}</span>
+                      <span>{formatNumber(candidate.summary?.confidence_score ?? candidate.confidence_score)}</span>
+                      <span>{candidateAccessLabel(candidate.access)}</span>
+                      <button type="button" className="secondary-button" onClick={() => handleOpenCandidate(candidate.user_id)}>
+                        {candidate.access?.is_unlocked ? "Open profile" : "Preview"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <button type="button" className="secondary-button" onClick={() => setActiveView("room")}>
-                Open room
-              </button>
-            </div>
-            <RoomStage items={roomItems} compact themeID={roomThemeID} windowSceneID={windowSceneID} />
-          </div>
+            </>
+          ) : (
+            <>
+              <div className="card stats-card">
+                <p className="eyebrow">Skill score</p>
+                <h2>{formatNumber(profile.current_skill_score)}</h2>
+                <div className="stats-row">
+                  <Stat label="Confidence" value={formatNumber(profile.confidence_score)} />
+                  <Stat label="Global %" value={formatNumber(profile.percentile_global)} />
+                  <Stat label="Solved" value={profile.completed_challenges || 0} />
+                </div>
+              </div>
+              <div className="card">
+                <p className="eyebrow">Skill distribution</p>
+                <div className="skill-list">
+                  {skills.map((skill) => (
+                    <div key={skill.skill_code} className="skill-item">
+                      <div className="skill-row">
+                        <div className="skill-meta">
+                          <span className="skill-name">{labelize(skill.skill_code)}</span>
+                          <span className={`skill-level ${levelClass(skill.level)}`}>{skill.level}</span>
+                        </div>
+                        <strong>{formatNumber(skill.score)}</strong>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="card">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">Developer profile</p>
+                    <h3>Attach your LinkedIn</h3>
+                  </div>
+                </div>
+                <label className="form-row profile-form-row">
+                  <span>LinkedIn</span>
+                  <input
+                    type="url"
+                    placeholder="https://www.linkedin.com/in/your-profile"
+                    value={linkedInDraft}
+                    onChange={(event) => setLinkedInDraft(event.target.value)}
+                  />
+                </label>
+                <p className="muted-copy">Recruiters can view this link only after they unlock your full profile.</p>
+                {profileNotice ? <p className="inline-success">{profileNotice}</p> : null}
+                <button type="button" className="primary-button" onClick={handleSaveProfile} disabled={busyAction === "profile"}>
+                  {busyAction === "profile" ? "Saving..." : "Save profile"}
+                </button>
+              </div>
+              <div className="card card--span-2">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">Room state</p>
+                    <h3>Items move with real skill data</h3>
+                  </div>
+                  <button type="button" className="secondary-button" onClick={() => setActiveView("room")}>
+                    Open room
+                  </button>
+                </div>
+                <RoomStage items={roomItems} compact themeID={roomThemeID} windowSceneID={windowSceneID} />
+              </div>
+            </>
+          )}
         </section>
       ) : null}
 
@@ -711,7 +1021,57 @@ export default function WorkspaceClient() {
         </section>
       ) : null}
 
-      {activeView === "hr" ? (
+      {activeView === "leaderboard" ? (
+        <section className="workspace-grid workspace-grid--ranking">
+          <div className="card card--span-2">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Candidate leaderboard</p>
+                <h3>Sorted by score, confidence, and recent activity</h3>
+              </div>
+            </div>
+            <div className="ranking-table">
+              <div className="ranking-row ranking-row--header">
+                <span>Rank</span>
+                <span>User</span>
+                <span>Score</span>
+                <span>Confidence</span>
+                <span>Status</span>
+                <span>Action</span>
+              </div>
+              {leaderboard.map((candidate, index) => (
+                <div key={`${candidate.user_id}-${index}`} className="ranking-row">
+                  <span>#{index + 1}</span>
+                  <span>{candidate.username}</span>
+                  <span>{formatNumber(candidate.summary?.score ?? candidate.current_skill_score)}</span>
+                  <span>{formatNumber(candidate.summary?.confidence_score ?? candidate.confidence_score)}</span>
+                  <span>{candidateAccessLabel(candidate.access)}</span>
+                  <div className="candidate-card__actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => handleOpenCandidate(candidate.user_id)}
+                      disabled={busyAction === `candidate:${candidate.user_id}`}
+                    >
+                      {busyAction === `candidate:${candidate.user_id}` ? "Loading..." : candidate.access?.is_unlocked ? "Open profile" : "Preview"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => handleOpenCandidateRoom(candidate.user_id)}
+                      disabled={!candidate.access?.is_unlocked || busyAction === `room:${candidate.user_id}`}
+                    >
+                      {busyAction === `room:${candidate.user_id}` ? "Opening..." : "Open room"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activeView === "candidates" ? (
         <section className="workspace-grid workspace-grid--hr">
           {user.role === "hr" ? (
             <>
@@ -751,35 +1111,160 @@ export default function WorkspaceClient() {
                     {busyAction === "filters" ? "Applying..." : "Apply filters"}
                   </button>
                 </div>
+                {monetization ? (
+                  <div className="meta-row">
+                    <span className="meta-pill">{`${labelize(monetization.plan?.tier || "free")} plan`}</span>
+                    <span className="meta-pill">{`${monetization.usage?.candidate_unlocks_used || 0} / ${monetization.entitlements?.candidate_unlocks_per_month || 0} unlocks used`}</span>
+                    <span className="meta-pill">{`${Math.max((monetization.entitlements?.candidate_unlocks_per_month || 0) - (monetization.usage?.candidate_unlocks_used || 0), 0)} remaining`}</span>
+                  </div>
+                ) : null}
               </div>
-              {candidates.map((candidate) => {
-                const summary = candidate.summary || candidate;
-                return (
-                  <div key={candidate.user_id} className="card candidate-card">
+              {selectedCandidate ? (
+                <div className="card card--span-2 candidate-detail-card">
                   <div className="candidate-card__header">
                     <div>
-                      <h3>{candidate.username}</h3>
-                      <p>{candidate.country}</p>
+                      <p className="eyebrow">Candidate detail</p>
+                      <h3>{selectedCandidate.candidate?.username || "Candidate"}</h3>
+                      <p>{selectedCandidate.candidate?.country || ""}</p>
                     </div>
-                    <strong>{formatNumber(summary.score ?? candidate.current_skill_score)}</strong>
+                    <strong>{candidateAccessLabel(selectedCandidate.candidate?.access)}</strong>
                   </div>
                   <div className="stats-row">
-                    <Stat label="Percentile" value={formatNumber(summary.percentile ?? candidate.percentile_global)} />
-                    <Stat label="Confidence" value={`${formatNumber(summary.confidence_score ?? candidate.confidence_score)} / ${String(summary.confidence_level || candidate.confidence_level || "medium").toUpperCase()}`} />
-                    <Stat label="Solved" value={summary.tasks_completed ?? candidate.tasks_solved ?? 0} />
+                    <Stat label="Score" value={formatNumber(selectedCandidate.candidate?.summary?.score || selectedCandidate.candidate?.current_skill_score)} />
+                    <Stat label="Percentile" value={formatNumber(selectedCandidate.candidate?.summary?.percentile || selectedCandidate.candidate?.percentile_global)} />
+                    <Stat label="Confidence" value={`${formatNumber(selectedCandidate.candidate?.summary?.confidence_score || selectedCandidate.candidate?.confidence_score)} / ${String(selectedCandidate.candidate?.summary?.confidence_level || selectedCandidate.candidate?.confidence_level || "medium").toUpperCase()}`} />
                   </div>
-                  <p><strong>Strengths:</strong> {(candidate.strengths || []).map(labelize).join(", ") || "N/A"}</p>
-                  <p><strong>Weaknesses:</strong> {(candidate.weaknesses || []).map(labelize).join(", ") || "N/A"}</p>
-                  <ul className="plain-list">
-                    {(candidate.confidence_reasons || []).map((reason) => (
-                      <li key={reason}>{reason}</li>
-                    ))}
-                  </ul>
-                  <ul className="plain-list">
-                    {(candidate.recent_activity || []).map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
+                  {selectedCandidate.candidate?.access?.is_unlocked ? (
+                    <div className="candidate-detail-grid">
+                      <div className="candidate-detail-block">
+                        <span>Contact</span>
+                        <p>{selectedCandidate.contact?.email || "N/A"}</p>
+                        <p>
+                          {selectedCandidate.contact?.linkedin_url ? (
+                            <a href={selectedCandidate.contact.linkedin_url} target="_blank" rel="noreferrer">
+                              LinkedIn profile
+                            </a>
+                          ) : (
+                            "No LinkedIn attached"
+                          )}
+                        </p>
+                      </div>
+                      <div className="candidate-detail-block">
+                        <span>Profile</span>
+                        <p>{selectedCandidate.profile?.selected_track || "react"}</p>
+                        <p>{selectedCandidate.profile?.bio || "No bio yet."}</p>
+                      </div>
+                      <div className="candidate-detail-block">
+                        <span>Skills</span>
+                        <ul className="plain-list">
+                          {(selectedCandidate.skills || []).slice(0, 5).map((skill) => (
+                            <li key={skill.skill_code}>{`${labelize(skill.skill_code)} — ${formatNumber(skill.score)}`}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="candidate-detail-block">
+                        <span>Recent submissions</span>
+                        <ul className="plain-list">
+                          {(selectedCandidate.recent_submissions || []).slice(0, 5).map((entry) => (
+                            <li key={entry.submission_id}>{`${entry.template_title} · ${formatNumber(entry.final_score)} · ${entry.execution_status}`}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="candidate-detail-lock">
+                      <p>Contact, full profile, room breakdown, and submission history are locked until this candidate is unlocked.</p>
+                      <p>{`Locked fields: ${(selectedCandidate.locked_fields || []).map(labelize).join(", ")}`}</p>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => handleUnlockCandidate(selectedCandidate.candidate?.user_id)}
+                        disabled={busyAction === `unlock:${selectedCandidate.candidate?.user_id}` || !selectedCandidate.candidate?.access?.can_unlock}
+                      >
+                        {busyAction === `unlock:${selectedCandidate.candidate?.user_id}` ? "Unlocking..." : unlockActionLabel(selectedCandidate.candidate?.access)}
+                      </button>
+                    </div>
+                  )}
+                  {selectedCandidate.candidate?.access?.is_unlocked ? (
+                    <div className="candidate-card__actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => handleOpenCandidateRoom(selectedCandidate.candidate?.user_id)}
+                        disabled={busyAction === `room:${selectedCandidate.candidate?.user_id}`}
+                      >
+                        {busyAction === `room:${selectedCandidate.candidate?.user_id}` ? "Opening..." : "Open room"}
+                      </button>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => handleInviteCandidate(selectedCandidate.candidate?.user_id)}
+                        disabled={selectedCandidate.candidate?.access?.is_invited || !selectedCandidate.candidate?.access?.can_invite || busyAction === `invite:${selectedCandidate.candidate?.user_id}`}
+                      >
+                        {busyAction === `invite:${selectedCandidate.candidate?.user_id}` ? "Inviting..." : inviteActionLabel(selectedCandidate.candidate?.access)}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {candidates.map((candidate) => {
+                const summary = candidate.summary || candidate;
+                const access = candidate.access || {};
+                return (
+                  <div key={candidate.user_id} className="card candidate-card">
+                    <div className="candidate-card__header">
+                      <div>
+                        <h3>{candidate.username}</h3>
+                        <p>{candidate.country}</p>
+                      </div>
+                      <div className="candidate-card__status">
+                        <span className={access.is_unlocked ? "meta-pill meta-pill--success" : "meta-pill"}>{candidateAccessLabel(access)}</span>
+                        <strong>{formatNumber(summary.score ?? candidate.current_skill_score)}</strong>
+                      </div>
+                    </div>
+                    <div className="stats-row">
+                      <Stat label="Percentile" value={formatNumber(summary.percentile ?? candidate.percentile_global)} />
+                      <Stat label="Confidence" value={`${formatNumber(summary.confidence_score ?? candidate.confidence_score)} / ${String(summary.confidence_level || candidate.confidence_level || "medium").toUpperCase()}`} />
+                      <Stat label="Solved" value={summary.tasks_completed ?? candidate.tasks_solved ?? 0} />
+                    </div>
+                    <p><strong>Strengths:</strong> {(candidate.strengths || []).map(labelize).join(", ") || "N/A"}</p>
+                    <p><strong>Weaknesses:</strong> {(candidate.weaknesses || []).map(labelize).join(", ") || "N/A"}</p>
+                    <ul className="plain-list">
+                      {(candidate.confidence_reasons || []).map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                    <ul className="plain-list">
+                      {(candidate.recent_activity || []).map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                    <div className="candidate-card__actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => handleOpenCandidate(candidate.user_id)}
+                        disabled={busyAction === `candidate:${candidate.user_id}`}
+                      >
+                        {busyAction === `candidate:${candidate.user_id}` ? "Loading..." : access.is_unlocked ? "View full profile" : "View preview"}
+                      </button>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => handleUnlockCandidate(candidate.user_id)}
+                        disabled={access.is_unlocked || !access.can_unlock || busyAction === `unlock:${candidate.user_id}`}
+                      >
+                        {busyAction === `unlock:${candidate.user_id}` ? "Unlocking..." : unlockActionLabel(access)}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => handleOpenCandidateRoom(candidate.user_id)}
+                        disabled={!access.is_unlocked || busyAction === `room:${candidate.user_id}`}
+                      >
+                        {busyAction === `room:${candidate.user_id}` ? "Opening..." : "Open room"}
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -793,6 +1278,57 @@ export default function WorkspaceClient() {
         </section>
       ) : null}
 
+      {activeView === "candidate-room" ? (
+        <section className="workspace-grid workspace-grid--room">
+          {selectedCandidate?.candidate?.access?.is_unlocked ? (
+            <>
+              <div className="card room-scene-card">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">Candidate room</p>
+                    <h3>{`${selectedCandidate.candidate?.username || "Candidate"}'s skill room`}</h3>
+                  </div>
+                  <div className="candidate-card__actions">
+                    <button type="button" className="secondary-button" onClick={() => setActiveView("leaderboard")}>
+                      Back to leaderboard
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => handleInviteCandidate(selectedCandidate.candidate?.user_id)}
+                      disabled={selectedCandidate.candidate?.access?.is_invited || !selectedCandidate.candidate?.access?.can_invite || busyAction === `invite:${selectedCandidate.candidate?.user_id}`}
+                    >
+                      {busyAction === `invite:${selectedCandidate.candidate?.user_id}` ? "Inviting..." : inviteActionLabel(selectedCandidate.candidate?.access)}
+                    </button>
+                  </div>
+                </div>
+                <RoomStage
+                  items={selectedCandidate.room || []}
+                  selectedCode={selectedCandidateRoomCode}
+                  onSelect={setSelectedCandidateRoomCode}
+                  themeID={roomThemeID}
+                  windowSceneID={windowSceneID}
+                />
+              </div>
+              <div className="card room-inspector">
+                <p className="eyebrow">Candidate inspector</p>
+                <RoomInspector
+                  item={selectedCandidateRoomItem}
+                  slot={selectedCandidateRoomSlot}
+                  onSelect={setSelectedCandidateRoomCode}
+                  items={orderedCandidateRoomItems}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="card empty-panel">
+              <h3>Unlock a candidate first</h3>
+              <p>Candidate rooms become available after the full profile is unlocked.</p>
+            </div>
+          )}
+        </section>
+      ) : null}
+
       {loading ? <div className="loading-bar" /> : null}
     </main>
   );
@@ -800,7 +1336,7 @@ export default function WorkspaceClient() {
 
 function defaultView(role) {
   if (role === "hr") {
-    return "hr";
+    return "candidates";
   }
   return "overview";
 }
@@ -844,6 +1380,28 @@ async function fetchCandidates(token, filters) {
   return apiFetch(`/v1/hr/candidates?${query.toString()}`, { token });
 }
 
+async function fetchHRLeaderboard(token) {
+  return apiFetch("/v1/hr/leaderboard", { token });
+}
+
+async function fetchCandidateDetail(token, userID) {
+  return apiFetch(`/v1/hr/candidates/${userID}`, { token });
+}
+
+async function unlockCandidate(token, userID) {
+  return apiFetch(`/v1/hr/candidates/${userID}/unlock`, {
+    method: "POST",
+    token,
+  });
+}
+
+async function inviteCandidate(token, userID) {
+  return apiFetch(`/v1/hr/candidates/${userID}/invite`, {
+    method: "POST",
+    token,
+  });
+}
+
 function readState(item) {
   if (!item || typeof item !== "object") {
     return {};
@@ -863,6 +1421,48 @@ function excerpt(value) {
     return "";
   }
   return String(value).replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function candidateAccessLabel(access) {
+  if (!access) {
+    return "Locked";
+  }
+  if (access.is_invited) {
+    return "Invited";
+  }
+  if (access.is_unlocked) {
+    return "Unlocked";
+  }
+  return `${access.remaining_unlocks || 0} unlocks left`;
+}
+
+function unlockActionLabel(access) {
+  if (!access) {
+    return "Unlock candidate";
+  }
+  if (access.is_unlocked) {
+    return "Unlocked";
+  }
+  if (!access.can_unlock) {
+    return "Unlock limit reached";
+  }
+  return `Unlock candidate (${access.remaining_unlocks || 0} left)`;
+}
+
+function inviteActionLabel(access) {
+  if (!access) {
+    return "Invite candidate";
+  }
+  if (access.is_invited) {
+    return "Invited";
+  }
+  if (!access.is_unlocked) {
+    return "Unlock before invite";
+  }
+  if (!access.can_invite) {
+    return "Invite limit reached";
+  }
+  return `Invite candidate (${access.remaining_invites || 0} left)`;
 }
 
 function fileName(value) {
@@ -1133,7 +1733,37 @@ function RoomSlot({ slot, item, interactive, selected, onSelect }) {
             {showLevelBadge ? <span className={`room-slot__level-badge room-slot__level-badge--${level}`}>{level}</span> : null}
           </div>
         )}
+        {selected ? <RoomSlotPopover slot={slot} item={item} /> : null}
       </button>
+    </div>
+  );
+}
+
+function RoomSlotPopover({ slot, item }) {
+  const presentationMode = roomPresentationMode(slot, item);
+  const explanation = excerpt(readState(item).explanation || "");
+  const achievements = roomAchievementEntries(item).slice(0, 3);
+  return (
+    <div className="room-slot__popover">
+      <p className="room-slot__popover-skill">{slot.skill}</p>
+      <strong>{slot.title}</strong>
+      <span className="room-slot__popover-meta">{roomMetaLabel(slot, item)}</span>
+      {presentationMode === "achievement_case" ? (
+        achievements.length > 0 ? (
+          <ul className="plain-list">
+            {achievements.map((achievement) => (
+              <li key={achievement.code || achievement.title}>
+                <strong>{achievement.title}</strong>
+                {achievement.description ? ` — ${achievement.description}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted-copy">No trophies yet.</p>
+        )
+      ) : (
+        <p className="muted-copy">{explanation || "Open the inspector for linked tasks and full evidence."}</p>
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     selected_track TEXT NOT NULL,
     bio TEXT NOT NULL DEFAULT '',
     avatar_url TEXT NOT NULL DEFAULT '',
+    linkedin_url TEXT NOT NULL DEFAULT '',
     current_skill_score DOUBLE PRECISION NOT NULL DEFAULT 0,
     percentile_global DOUBLE PRECISION NOT NULL DEFAULT 0,
     percentile_country DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -22,6 +23,8 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     completed_challenges INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS linkedin_url TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS refresh_sessions (
     token TEXT PRIMARY KEY,
@@ -313,6 +316,18 @@ CREATE TABLE IF NOT EXISTS candidate_unlocks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_candidate_unlocks_recruiter_id ON candidate_unlocks(recruiter_user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS candidate_invites (
+    id TEXT PRIMARY KEY,
+    recruiter_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    candidate_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    UNIQUE (recruiter_user_id, candidate_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_invites_recruiter_id ON candidate_invites(recruiter_user_id, created_at);
 
 CREATE TABLE IF NOT EXISTS ai_usage_events (
     id TEXT PRIMARY KEY,

@@ -19,6 +19,7 @@ type Plan struct {
 type PlanEntitlements struct {
 	CandidatePreview          bool `json:"candidate_preview"`
 	CandidateUnlocksPerMonth  int  `json:"candidate_unlocks_per_month"`
+	CandidateInvitesPerMonth  int  `json:"candidate_invites_per_month"`
 	HRAIActionsPerMonth       int  `json:"hr_ai_actions_per_month"`
 	HRAdvancedFilters         bool `json:"hr_advanced_filters"`
 	BusinessSeats             int  `json:"business_seats"`
@@ -44,6 +45,15 @@ type Subscription struct {
 }
 
 type CandidateUnlock struct {
+	ID              string    `json:"id"`
+	RecruiterUserID string    `json:"recruiter_user_id"`
+	CandidateUserID string    `json:"candidate_user_id"`
+	Source          string    `json:"source"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type CandidateInvite struct {
 	ID              string    `json:"id"`
 	RecruiterUserID string    `json:"recruiter_user_id"`
 	CandidateUserID string    `json:"candidate_user_id"`
@@ -97,6 +107,7 @@ type MonetizationUsage struct {
 	PeriodStart           time.Time `json:"period_start"`
 	PeriodEnd             time.Time `json:"period_end"`
 	CandidateUnlocksUsed  int       `json:"candidate_unlocks_used"`
+	CandidateInvitesUsed  int       `json:"candidate_invites_used"`
 	HRAIActionsUsed       int       `json:"hr_ai_actions_used"`
 	DeveloperHintsUsed    int       `json:"developer_hints_used"`
 	DeveloperExplainsUsed int       `json:"developer_explains_used"`
