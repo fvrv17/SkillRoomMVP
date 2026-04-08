@@ -1,45 +1,39 @@
 package backend
 
 import (
-	"mime"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-
-	webui "github.com/fvrv17/mvp/web"
 )
 
 func (a *App) mountFrontend(r chi.Router) {
-	r.Get("/", a.serveFrontendAsset("index.html"))
-	r.Get("/styles.css", a.serveFrontendAsset("styles.css"))
-	r.Get("/app.js", a.serveFrontendAsset("app.js"))
+	r.Get("/", a.handleFrontendRoot)
 }
 
-func (a *App) serveFrontendAsset(name string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if name == "index.html" {
-			if redirectURL := strings.TrimSpace(os.Getenv("FRONTEND_REDIRECT_URL")); redirectURL != "" {
-				http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
-				return
-			}
-		}
-		payload, err := webui.ReadFile(name)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		if contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(name))); contentType != "" {
-			w.Header().Set("Content-Type", contentType)
-		}
-		if name == "index.html" {
-			w.Header().Set("Cache-Control", "no-store")
-		} else {
-			w.Header().Set("Cache-Control", "public, max-age=300")
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(payload)
+func (a *App) handleFrontendRoot(w http.ResponseWriter, r *http.Request) {
+	if redirectURL := strings.TrimSpace(os.Getenv("FRONTEND_REDIRECT_URL")); redirectURL != "" {
+		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+		return
 	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SkillRoom Backend</title>
+  </head>
+  <body>
+    <main>
+      <h1>SkillRoom backend is running</h1>
+      <p>The active browser client is the Next.js frontend served separately.</p>
+      <p>Set FRONTEND_REDIRECT_URL to redirect this root route to the frontend.</p>
+    </main>
+  </body>
+</html>`))
 }

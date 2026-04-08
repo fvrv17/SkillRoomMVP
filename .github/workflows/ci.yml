@@ -19,16 +19,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
       - name: Run Go tests
         run: go test -mod=mod ./...
 
-      - name: Check frontend script syntax
-        run: node --check web/app.js
+      - name: Build frontend container
+        run: docker build -f deploy/frontend.Dockerfile -t mvp-frontend:ci .
 
       - name: Build backend container
         run: docker build -f deploy/backend.Dockerfile -t mvp-backend:ci .

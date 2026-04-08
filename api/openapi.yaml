@@ -11,6 +11,8 @@ tags:
   - name: Auth
   - name: Profile
   - name: Challenges
+  - name: AI
+  - name: Social
   - name: Rankings
   - name: HR
 paths:
@@ -79,6 +81,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
+  /v1/me:
+    get:
+      tags: [Profile]
+      security:
+        - BearerAuth: []
+      summary: Get the authenticated user record
+      responses:
+        '200':
+          description: Current user with embedded profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
   /v1/profile:
     get:
       tags: [Profile]
@@ -105,6 +122,21 @@ paths:
                   - Multiple completed tasks make the score more stable.
                 completed_challenges: 8
                 updated_at: '2025-01-16T12:00:00Z'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/skills:
+    get:
+      tags: [Profile]
+      security:
+        - BearerAuth: []
+      summary: Get the current user skill breakdown
+      responses:
+        '200':
+          description: Skill entries used for score and room mapping
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillsResponse'
         '401':
           $ref: '#/components/responses/ErrorResponse'
   /v1/room:
@@ -134,6 +166,16 @@ paths:
                     state_json:
                       skill: architecture
                       explanation: Architecture score currently maps to the starter chair tier.
+                  - room_item_code: trophy_case
+                    current_level: bronze
+                    current_variant: trophy_case_default
+                    state_json:
+                      presentation_mode: achievement_case
+                      achievement_count: 2
+                      achievements:
+                        - code: percentile_top_10
+                          title: Top 10% globally
+                          description: Reached the global top 10 percent of candidates.
         '401':
           $ref: '#/components/responses/ErrorResponse'
   /v1/challenges/templates:
@@ -200,6 +242,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/ChallengeInstanceView'
         '404':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/challenges/instances/{instanceID}/telemetry:
+    post:
+      tags: [Challenges]
+      security:
+        - BearerAuth: []
+      summary: Record challenge telemetry for anti-cheat and confidence signals
+      parameters:
+        - $ref: '#/components/parameters/InstanceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryEventRequest'
+      responses:
+        '201':
+          description: Telemetry accepted with updated summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryResponse'
+        '400':
           $ref: '#/components/responses/ErrorResponse'
   /v1/challenges/instances/{instanceID}/runs:
     post:
@@ -288,6 +353,54 @@ paths:
                     task_quality: 100
         '400':
           $ref: '#/components/responses/ErrorResponse'
+  /v1/ai/challenges/{instanceID}/hint:
+    post:
+      tags: [AI]
+      security:
+        - BearerAuth: []
+      summary: Request a limited AI hint for the active challenge
+      parameters:
+        - $ref: '#/components/parameters/InstanceID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIHintRequest'
+      responses:
+        '200':
+          description: Hint response with remaining allowance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIHintResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/ai/challenges/{instanceID}/explain:
+    post:
+      tags: [AI]
+      security:
+        - BearerAuth: []
+      summary: Explain the evaluation for a submitted challenge
+      parameters:
+        - $ref: '#/components/parameters/InstanceID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIExplanationRequest'
+      responses:
+        '200':
+          description: Evaluation explanation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIExplanationResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
   /v1/rankings/global:
     get:
       tags: [Rankings]
@@ -306,6 +419,109 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/RankingEntry'
+  /v1/rankings/country:
+    get:
+      tags: [Rankings]
+      security:
+        - BearerAuth: []
+      summary: Fetch the ranking scoped to the authenticated user's country
+      responses:
+        '200':
+          description: Country ranking
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RankingsResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/rankings/friends:
+    get:
+      tags: [Rankings]
+      security:
+        - BearerAuth: []
+      summary: Fetch the ranking scoped to the authenticated user's friends
+      responses:
+        '200':
+          description: Friends ranking
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RankingsResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/friends/{userID}/request:
+    post:
+      tags: [Social]
+      security:
+        - BearerAuth: []
+      summary: Send a friend request
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '201':
+          description: Friend request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/friends/{userID}/accept:
+    post:
+      tags: [Social]
+      security:
+        - BearerAuth: []
+      summary: Accept a friend request
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: Friend request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/chat/direct/{userID}/messages:
+    get:
+      tags: [Social]
+      security:
+        - BearerAuth: []
+      summary: List direct chat messages between the current user and another user
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: Direct chat history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessagesResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+    post:
+      tags: [Social]
+      security:
+        - BearerAuth: []
+      summary: Send a direct chat message
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '201':
+          description: Created message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
   /v1/hr/candidates:
     get:
       tags: [HR]
@@ -343,6 +559,94 @@ paths:
                       $ref: '#/components/schemas/CandidateView'
         '401':
           $ref: '#/components/responses/ErrorResponse'
+  /v1/hr/companies:
+    post:
+      tags: [HR]
+      security:
+        - BearerAuth: []
+      summary: Create a recruiter company profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompanyRequest'
+      responses:
+        '201':
+          description: Created company
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Company'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/hr/companies/{companyID}/jobs:
+    post:
+      tags: [HR]
+      security:
+        - BearerAuth: []
+      summary: Create a job under a recruiter company
+      parameters:
+        - $ref: '#/components/parameters/CompanyID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobRequest'
+      responses:
+        '201':
+          description: Created job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/hr/shortlists:
+    post:
+      tags: [HR]
+      security:
+        - BearerAuth: []
+      summary: Add a candidate to a shortlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShortlistRequest'
+      responses:
+        '201':
+          description: Created shortlist entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HRShortlist'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/hr/ai/templates/{templateID}/mutation-preview:
+    post:
+      tags: [HR, AI]
+      security:
+        - BearerAuth: []
+      summary: Preview an AI-assisted deterministic mutation for an HR-visible challenge template
+      parameters:
+        - $ref: '#/components/parameters/TemplateID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIMutationPreviewRequest'
+      responses:
+        '200':
+          description: Mutation preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIMutationPreviewResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
 components:
   securitySchemes:
     BearerAuth:
@@ -353,6 +657,24 @@ components:
     InstanceID:
       in: path
       name: instanceID
+      required: true
+      schema:
+        type: string
+    UserID:
+      in: path
+      name: userID
+      required: true
+      schema:
+        type: string
+    CompanyID:
+      in: path
+      name: companyID
+      required: true
+      schema:
+        type: string
+    TemplateID:
+      in: path
+      name: templateID
       required: true
       schema:
         type: string
@@ -457,6 +779,13 @@ components:
           type: string
           format: date-time
       additionalProperties: true
+    SkillsResponse:
+      type: object
+      properties:
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSkill'
     ChallengeTemplate:
       type: object
       properties:
@@ -642,6 +971,22 @@ components:
           description: Legacy alias for execution_cost_ms retained for compatibility with older clients.
         solve_time_seconds:
           type: integer
+        edit_count:
+          type: integer
+        paste_events:
+          type: integer
+        focus_loss_events:
+          type: integer
+        snapshot_events:
+          type: integer
+        first_input_seconds:
+          type: integer
+        attempt_number:
+          type: integer
+        similarity_score:
+          type: number
+        suspicion_score:
+          type: integer
         errors:
           type: array
           items:
@@ -666,6 +1011,24 @@ components:
         last_event_at:
           type: string
           format: date-time
+    TelemetryEventRequest:
+      type: object
+      required: [event_type, offset_seconds]
+      properties:
+        event_type:
+          type: string
+        offset_seconds:
+          type: integer
+        payload:
+          type: object
+          additionalProperties: true
+    TelemetryResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        summary:
+          $ref: '#/components/schemas/TelemetrySummary'
     RunPreviewResponse:
       type: object
       properties:
@@ -747,6 +1110,83 @@ components:
           type: number
         signals:
           $ref: '#/components/schemas/TelemetrySummary'
+    AIHintRequest:
+      type: object
+      properties:
+        focus_area:
+          type: string
+        question:
+          type: string
+    AIHintResponse:
+      type: object
+      properties:
+        provider:
+          type: string
+        hint:
+          type: string
+        focus_area:
+          type: string
+        used_hints:
+          type: integer
+        remaining_hints:
+          type: integer
+    AIExplanationRequest:
+      type: object
+      properties:
+        submission_id:
+          type: string
+    AIExplanationResponse:
+      type: object
+      properties:
+        provider:
+          type: string
+        summary:
+          type: string
+        strengths:
+          type: array
+          items:
+            type: string
+        improvements:
+          type: array
+          items:
+            type: string
+        suspicion_notes:
+          type: array
+          items:
+            type: string
+        recommended_next:
+          type: string
+    AIMutationPreviewRequest:
+      type: object
+      properties:
+        seed:
+          type: integer
+          format: int64
+    AIMutationPreviewResponse:
+      type: object
+      properties:
+        provider:
+          type: string
+        seed:
+          type: integer
+          format: int64
+        title:
+          type: string
+        description_md:
+          type: string
+        variable_renames:
+          type: object
+          additionalProperties:
+            type: string
+        reviewer_notes:
+          type: array
+          items:
+            type: string
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
     UserSkill:
       type: object
       properties:
@@ -834,6 +1274,127 @@ components:
           format: date-time
         completed_challenges:
           type: integer
+    RankingsResponse:
+      type: object
+      properties:
+        rankings:
+          type: array
+          items:
+            $ref: '#/components/schemas/RankingEntry'
+    ChatRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        chat_id:
+          type: string
+        sender_user_id:
+          type: string
+        body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    ChatMessagesResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+    CompanyRequest:
+      type: object
+      required: [name, description]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+    Company:
+      type: object
+      properties:
+        id:
+          type: string
+        owner_user_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        room_state_json:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+    JobRequest:
+      type: object
+      required: [title, description]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        required_score:
+          type: number
+        required_skills_json:
+          type: object
+          additionalProperties:
+            type: number
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        company_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        required_score:
+          type: number
+        required_skills_json:
+          type: object
+          additionalProperties:
+            type: number
+        created_at:
+          type: string
+          format: date-time
+    ShortlistRequest:
+      type: object
+      required: [company_id, user_id, status]
+      properties:
+        company_id:
+          type: string
+        user_id:
+          type: string
+        status:
+          type: string
+        notes:
+          type: string
+    HRShortlist:
+      type: object
+      properties:
+        id:
+          type: string
+        company_id:
+          type: string
+        user_id:
+          type: string
+        status:
+          type: string
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     CandidateSummary:
       type: object
       description: Fast recruiter-facing summary intended to be readable in under 10 seconds.

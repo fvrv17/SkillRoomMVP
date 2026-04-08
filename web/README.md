@@ -7,4 +7,5 @@ Files:
 - `app.js`
 - `assets.go`
 
-This shell remains only as a lightweight backend-served fallback. The primary frontend is the Next.js app in `frontend/`.
+This shell is a legacy snapshot and is no longer part of the active runtime path.
+The supported browser client is the Next.js app in `frontend/`.
