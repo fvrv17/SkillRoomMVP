@@ -4,8 +4,8 @@ import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { apiFetch, clearAuth, loadAuth, loadPreview, loadRegionId, setPreview } from "@/lib/client";
-import { createPreviewChallenge, PREVIEW_DATA, PREVIEW_TEMPLATES, REGIONS } from "@/lib/preview-data";
+import { apiFetch, clearAuth, loadAuth, loadRegionId } from "@/lib/client";
+import { REGIONS } from "@/lib/preview-data";
 import {
   ROOM_DEFAULT_THEME_ID,
   ROOM_DEFAULT_WINDOW_SCENE_ID,
@@ -58,11 +58,10 @@ export default function WorkspaceClient() {
 
   useEffect(() => {
     const auth = loadAuth();
-    const preview = loadPreview();
     const region = REGIONS.find((item) => item.id === loadRegionId()) || REGIONS[0];
-    const nextSession = { auth, preview, region };
+    const nextSession = { auth, region };
     setSession(nextSession);
-    setActiveView(defaultView(auth?.user?.role, preview));
+    setActiveView(defaultView(auth?.user?.role));
     setBooting(false);
   }, []);
 
@@ -80,9 +79,8 @@ export default function WorkspaceClient() {
   const templates = data.templates || [];
   const rankings = data.rankings || [];
   const candidates = data.candidates || [];
-  const previewMode = Boolean(session?.preview);
   const token = session?.auth?.access_token || "";
-  const allowedNav = NAV_ITEMS.filter((item) => previewMode || user.role === "hr" || item.id !== "hr");
+  const allowedNav = NAV_ITEMS.filter((item) => user.role === "hr" || item.id !== "hr");
   const editableFiles = currentChallenge?.editableFiles || [];
   const editorFiles = currentChallenge?.files || {};
   const visibleTests = currentChallenge?.visibleTests || {};
@@ -113,20 +111,6 @@ export default function WorkspaceClient() {
     setError("");
 
     try {
-      if (currentSession.preview) {
-        setData({
-          user: { ...PREVIEW_DATA.user, country: currentSession.region.country },
-          profile: { ...PREVIEW_DATA.profile },
-          skills: PREVIEW_DATA.skills,
-          room: PREVIEW_DATA.room,
-          rankings: PREVIEW_DATA.rankings,
-          templates: PREVIEW_TEMPLATES,
-          candidates: PREVIEW_DATA.candidates,
-        });
-        setCurrentChallenge(null);
-        return;
-      }
-
       if (!currentSession.auth?.access_token) {
         return;
       }
@@ -154,19 +138,17 @@ export default function WorkspaceClient() {
         templates: templatesPayload.templates || [],
         candidates: candidatePayload.candidates || [],
       });
-      setActiveView(defaultView(me.role, false));
+      setActiveView(defaultView(me.role));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load workspace");
-      if (!currentSession.preview) {
-        clearAuth();
-      }
+      clearAuth();
     } finally {
       setLoading(false);
     }
   }
 
   async function refreshAfterSubmission(profilePayload, skillsPayload, roomPayload) {
-    if (previewMode || !token) {
+    if (!token) {
       return;
     }
     const rankingPayload = await apiFetch("/v1/rankings/global", { token });
@@ -186,18 +168,6 @@ export default function WorkspaceClient() {
   }
 
   async function handleApplyFilters() {
-    if (previewMode) {
-      const minScore = Number(filters.minScore || 0);
-      const minConfidence = Number(filters.minConfidence || 0);
-      const nextCandidates = PREVIEW_DATA.candidates.filter(
-        (candidate) =>
-          candidate.current_skill_score >= minScore &&
-          candidate.confidence_score >= minConfidence,
-      );
-      setData((current) => ({ ...current, candidates: nextCandidates }));
-      return;
-    }
-
     if (!token || user.role !== "hr") {
       return;
     }
@@ -222,14 +192,12 @@ export default function WorkspaceClient() {
     setExplanationResult(null);
 
     try {
-      const view = previewMode
-        ? createPreviewChallenge(templateID)
-        : await apiFetch("/v1/challenges/instances", {
-            method: "POST",
-            token,
-            body: { template_id: templateID },
-          });
-      const nextChallenge = normalizeChallenge(view, previewMode);
+      const view = await apiFetch("/v1/challenges/instances", {
+        method: "POST",
+        token,
+        body: { template_id: templateID },
+      });
+      const nextChallenge = normalizeChallenge(view);
       setCurrentChallenge(nextChallenge);
       setActiveFile(nextChallenge.editableFiles[0] || "");
       setActiveView("challenges");
@@ -240,7 +208,7 @@ export default function WorkspaceClient() {
   }
 
   async function recordTelemetry(eventType, payload = {}) {
-    if (previewMode || !token || !currentChallenge?.instanceId) {
+    if (!token || !currentChallenge?.instanceId) {
       return;
     }
     const offsetSeconds = Math.max(0, Math.round((Date.now() - telemetryRef.current.startedAtMs) / 1000));
@@ -271,10 +239,6 @@ export default function WorkspaceClient() {
       },
     }));
 
-    if (previewMode) {
-      return;
-    }
-
     telemetryRef.current.inputCount += 1;
     if (!telemetryRef.current.firstInputSent) {
       telemetryRef.current.firstInputSent = true;
@@ -296,10 +260,6 @@ export default function WorkspaceClient() {
 
   async function handleRunChecks() {
     if (!currentChallenge) {
-      return;
-    }
-    if (previewMode) {
-      setError("Preview mode shows the workspace layout only. Sign in to execute challenges in the runner.");
       return;
     }
 
@@ -327,10 +287,6 @@ export default function WorkspaceClient() {
 
   async function handleSubmit() {
     if (!currentChallenge) {
-      return;
-    }
-    if (previewMode) {
-      setError("Preview mode cannot submit. Create an account to run the real evaluation pipeline.");
       return;
     }
 
@@ -365,15 +321,6 @@ export default function WorkspaceClient() {
       return;
     }
 
-    if (previewMode) {
-      setHintResult({
-        provider: "preview",
-        hint: "Start from the editable file, keep the public API stable, and use the visible tests to drive the first pass.",
-        remaining_hints: 2,
-      });
-      return;
-    }
-
     setBusyAction("hint");
     setError("");
     try {
@@ -395,16 +342,6 @@ export default function WorkspaceClient() {
       return;
     }
 
-    if (previewMode) {
-      setExplanationResult({
-        provider: "preview",
-        summary: "Execution explanations appear here after a real submission.",
-        strengths: ["Visible tests matched the task framing."],
-        improvements: ["Register to unlock runner-backed explanations."],
-      });
-      return;
-    }
-
     setBusyAction("explain");
     setError("");
     try {
@@ -423,7 +360,6 @@ export default function WorkspaceClient() {
 
   function handleSignOut() {
     clearAuth();
-    setPreview(false);
     router.push("/");
   }
 
@@ -431,12 +367,12 @@ export default function WorkspaceClient() {
     return <main className="workspace-shell"><section className="empty-state"><h1>Loading SkillRoom...</h1></section></main>;
   }
 
-  if (!session?.preview && !session?.auth) {
+  if (!session?.auth) {
     return (
       <main className="workspace-shell">
         <section className="empty-state">
           <h1>No active workspace</h1>
-          <p>Start from the launch scene to create an account or open the guided preview.</p>
+          <p>Start from the launch scene to create an account or sign in.</p>
           <Link href="/" className="primary-button">
             Back to launch
           </Link>
@@ -451,14 +387,14 @@ export default function WorkspaceClient() {
         <div>
           <div className="brand-chip">SkillRoom</div>
           <p className="workspace-subtitle">
-            {previewMode ? "Preview workspace" : `${user.username || "Workspace"} • ${user.role === "hr" ? "Recruiter" : "Candidate"}`}
+            {`${user.username || "Workspace"} • ${user.role === "hr" ? "Recruiter" : "Candidate"}`}
           </p>
         </div>
         <div className="workspace-meta">
           <span className="meta-pill">{session?.region?.label || "Americas"}</span>
-          <span className="meta-pill">{previewMode ? "Guest preview" : `Confidence ${formatNumber(profile.confidence_score)}`}</span>
+          <span className="meta-pill">{`Confidence ${formatNumber(profile.confidence_score)}`}</span>
           <button type="button" className="secondary-button" onClick={handleSignOut}>
-            {previewMode ? "Exit preview" : "Sign out"}
+            Sign out
           </button>
         </div>
       </header>
@@ -765,7 +701,7 @@ export default function WorkspaceClient() {
 
       {activeView === "hr" ? (
         <section className="workspace-grid workspace-grid--hr">
-          {previewMode || user.role === "hr" ? (
+          {user.role === "hr" ? (
             <>
               <div className="card card--span-2">
                 <div className="section-heading">
@@ -850,21 +786,17 @@ export default function WorkspaceClient() {
   );
 }
 
-function defaultView(role, preview) {
-  if (preview) {
-    return "overview";
-  }
+function defaultView(role) {
   if (role === "hr") {
     return "hr";
   }
   return "overview";
 }
 
-function normalizeChallenge(view, preview) {
+function normalizeChallenge(view) {
   const generatedFiles = { ...(view.variant?.generated_files || {}) };
   const editableFiles = [...(view.editable_files || view.variant?.editable_files || [])];
   return {
-    preview,
     instanceId: view.instance?.id || view.instance?.ID || "",
     attemptNumber: view.instance?.attempt_number || 1,
     templateId: view.template_id,

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { apiFetch, loadAuth, loadRegionId, saveAuth, saveRegionId, setPreview } from "@/lib/client";
+import { apiFetch, loadAuth, loadRegionId, saveAuth, saveRegionId } from "@/lib/client";
 import { REGIONS } from "@/lib/preview-data";
 
 const emptyRegister = {
@@ -65,19 +65,12 @@ export default function LandingClient() {
         saveAuth(payload);
       }
       saveRegionId(region.id);
-      setPreview(false);
       router.push("/workspace");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to continue");
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function launchPreview() {
-    saveRegionId(region.id);
-    setPreview(true);
-    router.push("/workspace");
   }
 
   return (
@@ -212,16 +205,6 @@ export default function LandingClient() {
             {submitting ? "Opening workspace..." : mode === "register" ? "Create account" : "Sign in"}
           </button>
         </form>
-
-        <div className="preview-panel">
-          <div>
-            <strong>Explore without signing in</strong>
-            <p>Open a guided preview of the challenge room, rankings, and recruiter view before creating an account.</p>
-          </div>
-          <button type="button" className="secondary-button" onClick={launchPreview}>
-            Explore product preview
-          </button>
-        </div>
 
         {hasSession ? (
           <div className="session-banner">

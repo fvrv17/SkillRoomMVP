@@ -1,5 +1,4 @@
 const AUTH_KEY = "skillroom.auth";
-const PREVIEW_KEY = "skillroom.preview";
 const REGION_KEY = "skillroom.region";
 
 export function loadAuth() {
@@ -29,24 +28,6 @@ export function clearAuth() {
     return;
   }
   window.localStorage.removeItem(AUTH_KEY);
-}
-
-export function loadPreview() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  return window.localStorage.getItem(PREVIEW_KEY) === "true";
-}
-
-export function setPreview(enabled) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  if (enabled) {
-    window.localStorage.setItem(PREVIEW_KEY, "true");
-    return;
-  }
-  window.localStorage.removeItem(PREVIEW_KEY);
 }
 
 export function loadRegionId() {

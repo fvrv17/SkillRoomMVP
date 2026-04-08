@@ -135,7 +135,6 @@ button {
 .landing-header p,
 .muted-copy,
 .challenge-description,
-.preview-panel p,
 .empty-state p,
 .empty-panel p {
   color: var(--ink-muted);
@@ -327,7 +326,6 @@ button {
   cursor: default;
 }
 
-.preview-panel,
 .session-banner,
 .empty-state,
 .empty-panel,
@@ -343,7 +341,6 @@ button {
   box-shadow: var(--shadow-soft);
 }
 
-.preview-panel,
 .session-banner {
   display: flex;
   align-items: center;
@@ -1362,7 +1359,6 @@ button {
   }
 
   .workspace-header,
-  .preview-panel,
   .session-banner,
   .section-heading,
   .ranking-row {
