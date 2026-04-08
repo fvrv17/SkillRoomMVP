@@ -30,38 +30,45 @@ type refreshSession struct {
 }
 
 type App struct {
-	mu              sync.RWMutex
-	tokens          *security.TokenManager
-	accessTTL       time.Duration
-	refreshTTL      time.Duration
-	store           *SQLStore
-	ops             OpsStore
-	ai              AIProvider
-	runner          runsvc.Engine
-	metrics         *AppMetrics
-	users           map[string]User
-	emailIndex      map[string]string
-	refreshSessions map[string]refreshSession
-	skills          map[string]Skill
-	userSkills      map[string]map[string]UserSkill
-	roomItems       map[string]RoomItem
-	userRoomItems   map[string]map[string]UserRoomItem
-	templates       map[string]ChallengeTemplate
-	variants        map[string]ChallengeVariant
-	instances       map[string]ChallengeInstance
-	submissions     map[string]Submission
-	evaluations     map[string]EvaluationResult
-	telemetryEvents map[string][]TelemetryEvent
-	scoreEvents     map[string][]ScoreEvent
-	scoreHistory    map[string][]float64
-	friendships     map[string]map[string]Friendship
-	chats           map[string]Chat
-	directChats     map[string]string
-	chatMessages    map[string][]ChatMessage
-	companies       map[string]Company
-	jobs            map[string]Job
-	shortlists      []HRShortlist
-	aiInteractions  []AIInteraction
+	mu                sync.RWMutex
+	tokens            *security.TokenManager
+	accessTTL         time.Duration
+	refreshTTL        time.Duration
+	store             *SQLStore
+	ops               OpsStore
+	ai                AIProvider
+	runner            runsvc.Engine
+	metrics           *AppMetrics
+	users             map[string]User
+	emailIndex        map[string]string
+	refreshSessions   map[string]refreshSession
+	skills            map[string]Skill
+	userSkills        map[string]map[string]UserSkill
+	roomItems         map[string]RoomItem
+	userRoomItems     map[string]map[string]UserRoomItem
+	templates         map[string]ChallengeTemplate
+	variants          map[string]ChallengeVariant
+	instances         map[string]ChallengeInstance
+	submissions       map[string]Submission
+	evaluations       map[string]EvaluationResult
+	telemetryEvents   map[string][]TelemetryEvent
+	scoreEvents       map[string][]ScoreEvent
+	scoreHistory      map[string][]float64
+	friendships       map[string]map[string]Friendship
+	chats             map[string]Chat
+	directChats       map[string]string
+	chatMessages      map[string][]ChatMessage
+	companies         map[string]Company
+	jobs              map[string]Job
+	shortlists        []HRShortlist
+	aiInteractions    []AIInteraction
+	plans             map[string]Plan
+	subscriptions     map[string]Subscription
+	candidateUnlocks  map[string]map[string]CandidateUnlock
+	aiUsageEvents     map[string][]AIUsageEvent
+	cosmeticCatalog   map[string]CosmeticCatalogItem
+	userCosmetics     map[string]map[string]UserCosmetic
+	equippedCosmetics map[string]map[string]EquippedCosmetic
 }
 
 type RegisterRequest struct {
@@ -146,37 +153,45 @@ type ShortlistRequest struct {
 
 func NewApp(secret, issuer string) *App {
 	app := &App{
-		tokens:          security.NewTokenManager(secret, issuer),
-		accessTTL:       15 * time.Minute,
-		refreshTTL:      7 * 24 * time.Hour,
-		ops:             NewMemoryOpsStore(),
-		ai:              NewDeterministicAIProvider(),
-		metrics:         NewAppMetrics(),
-		users:           map[string]User{},
-		emailIndex:      map[string]string{},
-		refreshSessions: map[string]refreshSession{},
-		skills:          map[string]Skill{},
-		userSkills:      map[string]map[string]UserSkill{},
-		roomItems:       map[string]RoomItem{},
-		userRoomItems:   map[string]map[string]UserRoomItem{},
-		templates:       map[string]ChallengeTemplate{},
-		variants:        map[string]ChallengeVariant{},
-		instances:       map[string]ChallengeInstance{},
-		submissions:     map[string]Submission{},
-		evaluations:     map[string]EvaluationResult{},
-		telemetryEvents: map[string][]TelemetryEvent{},
-		scoreEvents:     map[string][]ScoreEvent{},
-		scoreHistory:    map[string][]float64{},
-		friendships:     map[string]map[string]Friendship{},
-		chats:           map[string]Chat{},
-		directChats:     map[string]string{},
-		chatMessages:    map[string][]ChatMessage{},
-		companies:       map[string]Company{},
-		jobs:            map[string]Job{},
-		aiInteractions:  []AIInteraction{},
+		tokens:            security.NewTokenManager(secret, issuer),
+		accessTTL:         15 * time.Minute,
+		refreshTTL:        7 * 24 * time.Hour,
+		ops:               NewMemoryOpsStore(),
+		ai:                NewDeterministicAIProvider(),
+		metrics:           NewAppMetrics(),
+		users:             map[string]User{},
+		emailIndex:        map[string]string{},
+		refreshSessions:   map[string]refreshSession{},
+		skills:            map[string]Skill{},
+		userSkills:        map[string]map[string]UserSkill{},
+		roomItems:         map[string]RoomItem{},
+		userRoomItems:     map[string]map[string]UserRoomItem{},
+		templates:         map[string]ChallengeTemplate{},
+		variants:          map[string]ChallengeVariant{},
+		instances:         map[string]ChallengeInstance{},
+		submissions:       map[string]Submission{},
+		evaluations:       map[string]EvaluationResult{},
+		telemetryEvents:   map[string][]TelemetryEvent{},
+		scoreEvents:       map[string][]ScoreEvent{},
+		scoreHistory:      map[string][]float64{},
+		friendships:       map[string]map[string]Friendship{},
+		chats:             map[string]Chat{},
+		directChats:       map[string]string{},
+		chatMessages:      map[string][]ChatMessage{},
+		companies:         map[string]Company{},
+		jobs:              map[string]Job{},
+		aiInteractions:    []AIInteraction{},
+		plans:             map[string]Plan{},
+		subscriptions:     map[string]Subscription{},
+		candidateUnlocks:  map[string]map[string]CandidateUnlock{},
+		aiUsageEvents:     map[string][]AIUsageEvent{},
+		cosmeticCatalog:   map[string]CosmeticCatalogItem{},
+		userCosmetics:     map[string]map[string]UserCosmetic{},
+		equippedCosmetics: map[string]map[string]EquippedCosmetic{},
 	}
 
 	app.seedSkillsAndRoom()
+	app.seedMonetization()
 	for _, template := range DefaultChallengeTemplates() {
 		app.templates[template.ID] = template
 	}
@@ -256,6 +271,9 @@ func (a *App) Router() http.Handler {
 			r.Get("/profile", a.handleProfile)
 			r.Get("/skills", a.handleSkills)
 			r.Get("/room", a.handleRoom)
+			r.Get("/monetization/summary", a.handleMonetizationSummary)
+			r.Get("/dev/cosmetics/catalog", a.handleListCosmeticCatalog)
+			r.Get("/dev/cosmetics/inventory", a.handleCosmeticInventory)
 			r.Get("/challenges/templates", a.handleListTemplates)
 			r.Post("/challenges/instances", a.handleStartChallenge)
 			r.Get("/challenges/instances/{instanceID}", a.handleGetInstance)
@@ -733,7 +751,11 @@ func (a *App) register(ctx context.Context, req RegisterRequest) (AuthResponse, 
 	a.users[user.ID] = user
 	a.emailIndex[email] = user.ID
 	a.initUserStateLocked(user.ID, now)
+	a.initUserMonetizationLocked(user.ID, role, now)
 	if err := a.persistUserStateLocked(ctx, user.ID); err != nil {
+		return AuthResponse{}, err
+	}
+	if err := a.persistUserMonetizationLocked(ctx, user.ID); err != nil {
 		return AuthResponse{}, err
 	}
 	return a.mintAuthLocked(ctx, user)
@@ -754,6 +776,9 @@ func (a *App) login(ctx context.Context, req LoginRequest) (AuthResponse, error)
 	user.LastActiveAt = time.Now().UTC()
 	a.users[userID] = user
 	if err := a.persistUserStateLocked(ctx, userID); err != nil {
+		return AuthResponse{}, err
+	}
+	if err := a.persistUserMonetizationLocked(ctx, userID); err != nil {
 		return AuthResponse{}, err
 	}
 	return a.mintAuthLocked(ctx, user)
@@ -1115,6 +1140,18 @@ func (a *App) aiHint(ctx context.Context, userID, instanceID string, req AIHintR
 	if err := a.recordAIInteraction(ctx, interaction); err != nil {
 		return AIHintResponse{}, err
 	}
+	if err := a.recordAIUsage(ctx, AIUsageEvent{
+		UserID: userID,
+		Scope:  "developer",
+		Action: "developer_hint",
+		Units:  1,
+		Context: map[string]any{
+			"challenge_instance_id": instanceID,
+			"template_id":           templateDef.ID,
+		},
+	}); err != nil {
+		return AIHintResponse{}, err
+	}
 	return response, nil
 }
 
@@ -1169,6 +1206,19 @@ func (a *App) aiExplain(ctx context.Context, userID, instanceID string, req AIEx
 	if err := a.recordAIInteraction(ctx, interaction); err != nil {
 		return AIExplanationResponse{}, err
 	}
+	if err := a.recordAIUsage(ctx, AIUsageEvent{
+		UserID: userID,
+		Scope:  "developer",
+		Action: "developer_explain",
+		Units:  1,
+		Context: map[string]any{
+			"challenge_instance_id": instanceID,
+			"template_id":           templateDef.ID,
+			"submission_id":         submission.ID,
+		},
+	}); err != nil {
+		return AIExplanationResponse{}, err
+	}
 	return response, nil
 }
 
@@ -1218,6 +1268,18 @@ func (a *App) aiMutationPreview(ctx context.Context, userID, templateID string, 
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := a.recordAIInteraction(ctx, interaction); err != nil {
+		return AIMutationPreviewResponse{}, err
+	}
+	if err := a.recordAIUsage(ctx, AIUsageEvent{
+		UserID: userID,
+		Scope:  "hr",
+		Action: "hr_mutation_preview",
+		Units:  1,
+		Context: map[string]any{
+			"template_id": templateID,
+			"seed":        seed,
+		},
+	}); err != nil {
 		return AIMutationPreviewResponse{}, err
 	}
 	return response, nil
@@ -2602,6 +2664,7 @@ func (a *App) rebuildDerivedStateFromPersistence() {
 			}
 		}
 		a.normalizeUserRoomItemsLocked(userID, user.CreatedAt)
+		a.normalizeUserMonetizationLocked(userID, user.Role, user.CreatedAt)
 	}
 
 	type userScore struct {

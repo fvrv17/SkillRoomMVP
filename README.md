@@ -18,6 +18,7 @@ SkillRoom is a production-oriented MVP for evaluating React skills through real 
 - challenge bank includes 12+ real React and JavaScript templates with visible and hidden tests
 - room items reflect stored skill data
 - confidence and HR views include explanation data, not just raw numbers
+- monetization foundation is wired into the backend via plans, subscriptions, AI usage metering, and developer cosmetic inventory
 
 ## Main entrypoints
 
@@ -34,6 +35,17 @@ SkillRoom is a production-oriented MVP for evaluating React skills through real 
 - `docs/frontend-agent.md`
 - `docs/devops-agent.md`
 - `api/openapi.yaml`
+
+## Monetization foundation
+
+The current MVP ships the monetization architecture layer without billing integration:
+
+- default role-based plans for developers and recruiters
+- persisted subscriptions and entitlement snapshots
+- AI usage metering for developer hints/explanations and HR-side AI actions
+- developer cosmetic catalog, ownership, and equipped state for room customization
+
+HR candidate unlock flow and developer cosmetic purchases are intentionally deferred to later product sprints.
 
 ## Local stack
 

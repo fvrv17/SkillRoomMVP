@@ -85,6 +85,65 @@ func (s *SQLStore) SyncCatalog(ctx context.Context, app *App) error {
 			return err
 		}
 	}
+
+	for _, planCode := range sortedPlanCodes(app.plans) {
+		plan := app.plans[planCode]
+		featuresJSON, err := marshalJSON(plan.Features)
+		if err != nil {
+			return err
+		}
+		entitlementsJSON, err := marshalJSON(plan.Entitlements)
+		if err != nil {
+			return err
+		}
+		metadataJSON, err := marshalJSON(plan.Metadata)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO plans (id, code, name, audience, tier, currency, monthly_price_cents, active, features_json, entitlements_json, metadata_json)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			ON CONFLICT (id) DO UPDATE SET
+				code = EXCLUDED.code,
+				name = EXCLUDED.name,
+				audience = EXCLUDED.audience,
+				tier = EXCLUDED.tier,
+				currency = EXCLUDED.currency,
+				monthly_price_cents = EXCLUDED.monthly_price_cents,
+				active = EXCLUDED.active,
+				features_json = EXCLUDED.features_json,
+				entitlements_json = EXCLUDED.entitlements_json,
+				metadata_json = EXCLUDED.metadata_json
+		`, plan.ID, plan.Code, plan.Name, plan.Audience, plan.Tier, plan.Currency, plan.MonthlyPriceCents, plan.Active, featuresJSON, entitlementsJSON, metadataJSON); err != nil {
+			return err
+		}
+	}
+
+	for _, cosmeticCode := range sortedCosmeticCodes(app.cosmeticCatalog) {
+		item := app.cosmeticCatalog[cosmeticCode]
+		metadataJSON, err := marshalJSON(item.Metadata)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO cosmetic_catalog (id, code, name, category, slot_code, description, audience, rarity, premium, asset_ref, active, metadata_json)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			ON CONFLICT (id) DO UPDATE SET
+				code = EXCLUDED.code,
+				name = EXCLUDED.name,
+				category = EXCLUDED.category,
+				slot_code = EXCLUDED.slot_code,
+				description = EXCLUDED.description,
+				audience = EXCLUDED.audience,
+				rarity = EXCLUDED.rarity,
+				premium = EXCLUDED.premium,
+				asset_ref = EXCLUDED.asset_ref,
+				active = EXCLUDED.active,
+				metadata_json = EXCLUDED.metadata_json
+		`, item.ID, item.Code, item.Name, item.Category, item.SlotCode, item.Description, item.Audience, item.Rarity, item.Premium, item.AssetRef, item.Active, metadataJSON); err != nil {
+			return err
+		}
+	}
 	activeRoomCodes := sortedRoomItemCodes(app.roomItems)
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM user_room_items
@@ -200,6 +259,21 @@ func (s *SQLStore) LoadInto(ctx context.Context, app *App) error {
 		return err
 	}
 	if err := s.loadAIInteractions(ctx, app); err != nil {
+		return err
+	}
+	if err := s.loadSubscriptions(ctx, app); err != nil {
+		return err
+	}
+	if err := s.loadCandidateUnlocks(ctx, app); err != nil {
+		return err
+	}
+	if err := s.loadAIUsageEvents(ctx, app); err != nil {
+		return err
+	}
+	if err := s.loadUserCosmetics(ctx, app); err != nil {
+		return err
+	}
+	if err := s.loadEquippedCosmetics(ctx, app); err != nil {
 		return err
 	}
 	app.rebuildDerivedStateFromPersistence()

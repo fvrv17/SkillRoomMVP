@@ -271,3 +271,92 @@ CREATE TABLE IF NOT EXISTS hr_shortlists (
 );
 
 CREATE INDEX IF NOT EXISTS idx_hr_shortlists_company_id ON hr_shortlists(company_id);
+
+CREATE TABLE IF NOT EXISTS plans (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    audience TEXT NOT NULL,
+    tier TEXT NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    monthly_price_cents INTEGER NOT NULL DEFAULT 0,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    features_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    entitlements_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    plan_id TEXT NOT NULL REFERENCES plans(id),
+    plan_code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    auto_renew BOOLEAN NOT NULL DEFAULT FALSE,
+    current_period_start TIMESTAMPTZ NOT NULL,
+    current_period_end TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_plan_code ON subscriptions(plan_code);
+
+CREATE TABLE IF NOT EXISTS candidate_unlocks (
+    id TEXT PRIMARY KEY,
+    recruiter_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    candidate_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    UNIQUE (recruiter_user_id, candidate_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_unlocks_recruiter_id ON candidate_unlocks(recruiter_user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS ai_usage_events (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL,
+    action TEXT NOT NULL,
+    units INTEGER NOT NULL DEFAULT 1,
+    context_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_usage_events_user_id ON ai_usage_events(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS cosmetic_catalog (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    slot_code TEXT NOT NULL,
+    description TEXT NOT NULL,
+    audience TEXT NOT NULL,
+    rarity TEXT NOT NULL,
+    premium BOOLEAN NOT NULL DEFAULT FALSE,
+    asset_ref TEXT NOT NULL DEFAULT '',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS user_cosmetics (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    cosmetic_id TEXT NOT NULL REFERENCES cosmetic_catalog(id),
+    cosmetic_code TEXT NOT NULL,
+    source TEXT NOT NULL,
+    owned_at TIMESTAMPTZ NOT NULL,
+    UNIQUE (user_id, cosmetic_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_cosmetics_user_id ON user_cosmetics(user_id);
+
+CREATE TABLE IF NOT EXISTS equipped_cosmetics (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slot_code TEXT NOT NULL,
+    cosmetic_code TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (user_id, slot_code)
+);

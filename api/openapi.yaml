@@ -178,6 +178,60 @@ paths:
                           description: Reached the global top 10 percent of candidates.
         '401':
           $ref: '#/components/responses/ErrorResponse'
+  /v1/monetization/summary:
+    get:
+      tags: [Monetization]
+      security:
+        - BearerAuth: []
+      summary: Get the current user's plan, entitlement, and usage snapshot
+      responses:
+        '200':
+          description: Monetization summary for the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonetizationSummary'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/dev/cosmetics/catalog:
+    get:
+      tags: [Monetization]
+      security:
+        - BearerAuth: []
+      summary: List available developer room cosmetics
+      responses:
+        '200':
+          description: Cosmetic catalog for developer room customization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  catalog:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CosmeticCatalogItem'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/dev/cosmetics/inventory:
+    get:
+      tags: [Monetization]
+      security:
+        - BearerAuth: []
+      summary: Get the authenticated developer cosmetic catalog, ownership, and equipped state
+      responses:
+        '200':
+          description: Cosmetic inventory and equipped state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CosmeticInventoryResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
   /v1/challenges/templates:
     get:
       tags: [Challenges]
@@ -1452,3 +1506,180 @@ components:
           type: array
           items:
             type: string
+    PlanEntitlements:
+      type: object
+      properties:
+        candidate_preview:
+          type: boolean
+        candidate_unlocks_per_month:
+          type: integer
+        hr_ai_actions_per_month:
+          type: integer
+        hr_advanced_filters:
+          type: boolean
+        business_seats:
+          type: integer
+        developer_hints_per_month:
+          type: integer
+        developer_explains_per_month:
+          type: integer
+        developer_ai_free_beta:
+          type: boolean
+        cosmetic_customization:
+          type: boolean
+        premium_cosmetics:
+          type: boolean
+    Plan:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        audience:
+          type: string
+        tier:
+          type: string
+        currency:
+          type: string
+        monthly_price_cents:
+          type: integer
+        active:
+          type: boolean
+        features:
+          type: array
+          items:
+            type: string
+        entitlements:
+          $ref: '#/components/schemas/PlanEntitlements'
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        plan_id:
+          type: string
+        plan_code:
+          type: string
+        status:
+          type: string
+        source:
+          type: string
+        auto_renew:
+          type: boolean
+        current_period_start:
+          type: string
+          format: date-time
+        current_period_end:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MonetizationUsage:
+      type: object
+      properties:
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        candidate_unlocks_used:
+          type: integer
+        hr_ai_actions_used:
+          type: integer
+        developer_hints_used:
+          type: integer
+        developer_explains_used:
+          type: integer
+    MonetizationSummary:
+      type: object
+      properties:
+        plan:
+          $ref: '#/components/schemas/Plan'
+        subscription:
+          $ref: '#/components/schemas/Subscription'
+        entitlements:
+          $ref: '#/components/schemas/PlanEntitlements'
+        usage:
+          $ref: '#/components/schemas/MonetizationUsage'
+        feature_flags:
+          type: array
+          items:
+            type: string
+    CosmeticCatalogItem:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        slot_code:
+          type: string
+        description:
+          type: string
+        audience:
+          type: string
+        rarity:
+          type: string
+        premium:
+          type: boolean
+        asset_ref:
+          type: string
+        active:
+          type: boolean
+    UserCosmetic:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        cosmetic_id:
+          type: string
+        cosmetic_code:
+          type: string
+        source:
+          type: string
+        owned_at:
+          type: string
+          format: date-time
+    EquippedCosmetic:
+      type: object
+      properties:
+        user_id:
+          type: string
+        slot_code:
+          type: string
+        cosmetic_code:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    CosmeticInventoryResponse:
+      type: object
+      properties:
+        catalog:
+          type: array
+          items:
+            $ref: '#/components/schemas/CosmeticCatalogItem'
+        owned:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserCosmetic'
+        equipped:
+          type: array
+          items:
+            $ref: '#/components/schemas/EquippedCosmetic'
