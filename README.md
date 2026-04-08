@@ -43,6 +43,8 @@ docker compose -f deploy/docker-compose.yml up --build
 
 Open `http://localhost:3000` for the Next.js frontend.
 
+For a backend-only local boot without PostgreSQL or Redis, set `ALLOW_INSECURE_BOOT=true`. The default startup path now expects the full production-oriented stack.
+
 ## Testing
 
 ```bash

@@ -6,68 +6,52 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/fvrv17/mvp/internal/backend"
-	"github.com/fvrv17/mvp/internal/platform/config"
 	runsvc "github.com/fvrv17/mvp/internal/runner"
 )
 
 func main() {
-	addr := config.String("BACKEND_ADDR", ":8080")
-	secret := config.String("AUTH_TOKEN_SECRET", "dev-secret")
-	issuer := config.String("AUTH_TOKEN_ISSUER", "mvp-platform")
-	readTimeout := config.Duration("BACKEND_READ_TIMEOUT", 10*time.Second)
-	writeTimeout := config.Duration("BACKEND_WRITE_TIMEOUT", 30*time.Second)
-	idleTimeout := config.Duration("BACKEND_IDLE_TIMEOUT", 60*time.Second)
-	shutdownTimeout := config.Duration("BACKEND_SHUTDOWN_TIMEOUT", 10*time.Second)
-	databaseURL := config.String("DATABASE_URL", "")
-	redisAddr := config.String("REDIS_ADDR", "")
-	redisPassword := config.String("REDIS_PASSWORD", "")
-	redisDB := config.Int("REDIS_DB", 0)
-	openAIAPIKey := config.String("OPENAI_API_KEY", "")
-	openAIModel := config.String("OPENAI_MODEL", "gpt-4.1-mini")
-	openAIBaseURL := config.String("OPENAI_BASE_URL", "https://api.openai.com/v1")
-	openAIOrganization := config.String("OPENAI_ORGANIZATION", "")
-	openAIProject := config.String("OPENAI_PROJECT", "")
-	runnerBaseURL := config.String("RUNNER_BASE_URL", "")
-	runnerTimeout := config.Duration("RUNNER_TIMEOUT", 5*time.Second)
+	cfg, err := loadStartupConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, warning := range cfg.InsecureWarnings() {
+		log.Printf("WARNING: %s", warning)
+	}
 
-	app := backend.NewApp(secret, issuer)
-	if databaseURL != "" {
-		persistentApp, err := backend.NewPersistentApp(context.Background(), secret, issuer, databaseURL)
+	app := backend.NewApp(cfg.Secret, cfg.Issuer)
+	if cfg.DatabaseURL != "" {
+		persistentApp, err := backend.NewPersistentApp(context.Background(), cfg.Secret, cfg.Issuer, cfg.DatabaseURL)
 		if err != nil {
 			log.Fatal(err)
 		}
 		app = persistentApp
 	}
-	if redisAddr != "" {
-		app.SetOpsStore(backend.NewRedisOpsStore(redisAddr, redisPassword, redisDB))
-		log.Printf("backend ops store: redis %s db=%d", redisAddr, redisDB)
+	if cfg.RedisAddr != "" {
+		app.SetOpsStore(backend.NewRedisOpsStore(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB))
+		log.Printf("backend ops store: redis %s db=%d", cfg.RedisAddr, cfg.RedisDB)
 	} else {
 		log.Printf("backend ops store: in-memory")
 	}
-	if openAIAPIKey != "" {
+	if cfg.OpenAIAPIKey != "" {
 		app.SetAIProvider(backend.NewCompositeAIProvider(
-			backend.NewOpenAIResponsesProvider(openAIAPIKey, openAIModel, openAIBaseURL, openAIOrganization, openAIProject),
+			backend.NewOpenAIResponsesProvider(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIBaseURL, cfg.OpenAIOrganization, cfg.OpenAIProject),
 			backend.NewDeterministicAIProvider(),
 		))
-		log.Printf("backend ai provider: openai model=%s", openAIModel)
+		log.Printf("backend ai provider: openai model=%s", cfg.OpenAIModel)
 	} else {
 		log.Printf("backend ai provider: deterministic fallback")
 	}
-	if runnerBaseURL == "" {
-		log.Fatal("RUNNER_BASE_URL is required")
-	}
-	app.SetChallengeRunner(runsvc.NewHTTPClient(runnerBaseURL, runnerTimeout))
-	log.Printf("backend runner: remote %s", runnerBaseURL)
+	app.SetChallengeRunner(runsvc.NewHTTPClient(cfg.RunnerBaseURL, cfg.RunnerTimeout))
+	log.Printf("backend runner: remote %s", cfg.RunnerBaseURL)
 
 	server := &http.Server{
-		Addr:         addr,
+		Addr:         cfg.Addr,
 		Handler:      app.Router(),
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -75,7 +59,7 @@ func main() {
 
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		log.Printf("backend shutdown started")
 		if err := server.Shutdown(shutdownCtx); err != nil {
@@ -86,8 +70,8 @@ func main() {
 		}
 	}()
 
-	log.Printf("backend listening on %s", addr)
-	err := server.ListenAndServe()
+	log.Printf("backend listening on %s", cfg.Addr)
+	err = server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}

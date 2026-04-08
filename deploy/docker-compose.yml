@@ -77,7 +77,7 @@ services:
       dockerfile: deploy/backend.Dockerfile
     environment:
       BACKEND_ADDR: ":8080"
-      AUTH_TOKEN_SECRET: dev-secret
+      AUTH_TOKEN_SECRET: skillroom-local-dev-secret-change-me
       AUTH_TOKEN_ISSUER: mvp-platform
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/mvp?sslmode=disable
       REDIS_ADDR: redis:6379

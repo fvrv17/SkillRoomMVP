@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { apiFetch, clearAuth, loadAuth, loadRegionId } from "@/lib/client";
+import { apiFetch, clearAuth, isUnauthorizedError, loadAuth, loadRegionId, subscribeAuth } from "@/lib/client";
 import { REGIONS } from "@/lib/preview-data";
 import {
   ROOM_DEFAULT_THEME_ID,
@@ -63,6 +63,15 @@ export default function WorkspaceClient() {
     setSession(nextSession);
     setActiveView(defaultView(auth?.user?.role));
     setBooting(false);
+
+    return subscribeAuth(
+      (nextAuth) => {
+        setSession((current) => ({ ...(current || { region }), auth: nextAuth || null }));
+      },
+      () => {
+        setSession((current) => ({ ...(current || { region }), auth: null }));
+      },
+    );
   }, []);
 
   useEffect(() => {
@@ -140,8 +149,11 @@ export default function WorkspaceClient() {
       });
       setActiveView(defaultView(me.role));
     } catch (loadError) {
+      if (isUnauthorizedError(loadError)) {
+        setError("");
+        return;
+      }
       setError(loadError instanceof Error ? loadError.message : "Unable to load workspace");
-      clearAuth();
     } finally {
       setLoading(false);
     }

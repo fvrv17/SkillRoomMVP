@@ -192,6 +192,17 @@ func (a *App) handleReadiness(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) ready(ctx context.Context) error {
+	if a.runner == nil {
+		return fmt.Errorf("runner unavailable: engine is not configured")
+	}
+	type readinessChecker interface {
+		Ready(context.Context) error
+	}
+	if checker, ok := a.runner.(readinessChecker); ok {
+		if err := checker.Ready(ctx); err != nil {
+			return fmt.Errorf("runner unavailable: %w", err)
+		}
+	}
 	if a.store != nil {
 		if err := a.store.Ping(ctx); err != nil {
 			return fmt.Errorf("postgres unavailable: %w", err)

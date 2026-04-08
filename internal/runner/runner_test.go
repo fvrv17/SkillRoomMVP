@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type stubEngine struct {
@@ -101,4 +103,28 @@ func TestParseRunResult(t *testing.T) {
 	if result.Passed != 2 || result.Failed != 1 {
 		t.Fatalf("unexpected parsed result: %+v", result)
 	}
+}
+
+func TestHTTPClientReadyChecksRunnerReadiness(t *testing.T) {
+	client := NewHTTPClient("http://runner", 2*time.Second)
+	client.client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/readyz" {
+			t.Fatalf("unexpected path %s", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(bytes.NewBuffer(nil)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	if err := client.Ready(context.Background()); err != nil {
+		t.Fatalf("expected runner ready check to pass: %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

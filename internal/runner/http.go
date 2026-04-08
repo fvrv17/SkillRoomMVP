@@ -42,8 +42,8 @@ func NewHandler(engine Engine) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, RunResponse{
-			Status:   "ok",
-			Result:   result,
+			Status: "ok",
+			Result: result,
 		})
 	})
 	return requestLogger(mux)
@@ -99,6 +99,25 @@ func (c *HTTPClient) Run(ctx context.Context, req RunRequest) (RunResult, error)
 		return RunResult{}, err
 	}
 	return payload.Result, nil
+}
+
+func (c *HTTPClient) Ready(ctx context.Context) error {
+	if c == nil || c.baseURL == "" {
+		return errors.New("runner base url is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/readyz", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errors.New(resp.Status)
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
