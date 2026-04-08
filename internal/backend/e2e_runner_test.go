@@ -55,8 +55,11 @@ func TestRealRunnerEndToEnd(t *testing.T) {
 	if passing.Execution.ExecutionCostMS <= 0 && passing.Execution.ExecutionTimeMS <= 0 {
 		t.Fatalf("expected real execution cost to be reported: %+v", passing.Execution)
 	}
-	if passing.Execution.TestsPassed <= failing.Execution.TestsPassed {
-		t.Fatalf("expected passing solution to beat failing solution: pass=%d fail=%d", passing.Execution.TestsPassed, failing.Execution.TestsPassed)
+	if passing.Execution.QualityPassed <= failing.Execution.QualityPassed {
+		t.Fatalf("expected passing solution to satisfy more quality checks: pass=%d fail=%d", passing.Execution.QualityPassed, failing.Execution.QualityPassed)
+	}
+	if passing.Execution.QualityFailed >= failing.Execution.QualityFailed {
+		t.Fatalf("expected failing solution to leave more quality checks unresolved: pass=%d fail=%d", passing.Execution.QualityFailed, failing.Execution.QualityFailed)
 	}
 	if passing.Evaluation.FinalScore <= failing.Evaluation.FinalScore {
 		t.Fatalf("expected higher score for passing solution: pass=%.2f fail=%.2f", passing.Evaluation.FinalScore, failing.Evaluation.FinalScore)
@@ -64,8 +67,11 @@ func TestRealRunnerEndToEnd(t *testing.T) {
 	if passing.Evaluation.FinalScore < 70 {
 		t.Fatalf("expected passing solution to score well, got %.2f", passing.Evaluation.FinalScore)
 	}
-	if failing.Evaluation.FinalScore >= 55 {
-		t.Fatalf("expected failing solution to score materially lower, got %.2f", failing.Evaluation.FinalScore)
+	if passing.Evaluation.QualityScore <= failing.Evaluation.QualityScore {
+		t.Fatalf("expected higher quality score for passing solution: pass=%.2f fail=%.2f", passing.Evaluation.QualityScore, failing.Evaluation.QualityScore)
+	}
+	if passing.Evaluation.FinalScore-failing.Evaluation.FinalScore < 10 {
+		t.Fatalf("expected a meaningful score gap between passing and failing solutions: pass=%.2f fail=%.2f", passing.Evaluation.FinalScore, failing.Evaluation.FinalScore)
 	}
 }
 

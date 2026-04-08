@@ -177,6 +177,9 @@ func writeWorkspace(root string, req RunRequest) error {
 	if err := writeWorkspaceFile(root, "eslint.config.mjs", eslintConfigFile); err != nil {
 		return err
 	}
+	if err := makeWorkspaceDirsWritable(root); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -189,10 +192,25 @@ func writeWorkspaceFile(root, name, content string) error {
 	if !strings.HasPrefix(fullPath, root) {
 		return fmt.Errorf("invalid workspace path %q", name)
 	}
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o777); err != nil {
 		return err
 	}
 	return os.WriteFile(fullPath, []byte(content), 0o644)
+}
+
+func makeWorkspaceDirsWritable(root string) error {
+	// Docker copies host ownership into the container on some platforms, while
+	// the sandbox process runs without capability overrides. Explicit chmod keeps
+	// report and cache directories writable regardless of the host umask.
+	return filepath.Walk(root, func(currentPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return nil
+		}
+		return os.Chmod(currentPath, 0o777)
+	})
 }
 
 func parseRunResult(stdout string) (RunResult, error) {
