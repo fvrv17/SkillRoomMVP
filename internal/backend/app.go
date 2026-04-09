@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/netip"
 	"net/http"
 	"net/url"
 	"sort"
@@ -33,49 +34,52 @@ type refreshSession struct {
 const (
 	accessTokenCookieName  = "skillroom_access"
 	refreshTokenCookieName = "skillroom_refresh"
+	proxySecretHeaderName  = "X-SkillRoom-Proxy-Secret"
 )
 
 type App struct {
-	mu                sync.RWMutex
-	tokens            *security.TokenManager
-	accessTTL         time.Duration
-	refreshTTL        time.Duration
-	store             *SQLStore
-	ops               OpsStore
-	ai                AIProvider
-	runner            runsvc.Engine
-	metrics           *AppMetrics
-	users             map[string]User
-	emailIndex        map[string]string
-	refreshSessions   map[string]refreshSession
-	skills            map[string]Skill
-	userSkills        map[string]map[string]UserSkill
-	roomItems         map[string]RoomItem
-	userRoomItems     map[string]map[string]UserRoomItem
-	templates         map[string]ChallengeTemplate
-	variants          map[string]ChallengeVariant
-	instances         map[string]ChallengeInstance
-	submissions       map[string]Submission
-	evaluations       map[string]EvaluationResult
-	telemetryEvents   map[string][]TelemetryEvent
-	scoreEvents       map[string][]ScoreEvent
-	scoreHistory      map[string][]float64
-	friendships       map[string]map[string]Friendship
-	chats             map[string]Chat
-	directChats       map[string]string
-	chatMessages      map[string][]ChatMessage
-	companies         map[string]Company
-	jobs              map[string]Job
-	shortlists        []HRShortlist
-	aiInteractions    []AIInteraction
-	plans             map[string]Plan
-	subscriptions     map[string]Subscription
-	candidateUnlocks  map[string]map[string]CandidateUnlock
-	candidateInvites  map[string]map[string]CandidateInvite
-	aiUsageEvents     map[string][]AIUsageEvent
-	cosmeticCatalog   map[string]CosmeticCatalogItem
-	userCosmetics     map[string]map[string]UserCosmetic
-	equippedCosmetics map[string]map[string]EquippedCosmetic
+	mu                 sync.RWMutex
+	tokens             *security.TokenManager
+	accessTTL          time.Duration
+	refreshTTL         time.Duration
+	store              *SQLStore
+	ops                OpsStore
+	ai                 AIProvider
+	runner             runsvc.Engine
+	metrics            *AppMetrics
+	users              map[string]User
+	emailIndex         map[string]string
+	refreshSessions    map[string]refreshSession
+	skills             map[string]Skill
+	userSkills         map[string]map[string]UserSkill
+	roomItems          map[string]RoomItem
+	userRoomItems      map[string]map[string]UserRoomItem
+	templates          map[string]ChallengeTemplate
+	variants           map[string]ChallengeVariant
+	instances          map[string]ChallengeInstance
+	submissions        map[string]Submission
+	evaluations        map[string]EvaluationResult
+	telemetryEvents    map[string][]TelemetryEvent
+	scoreEvents        map[string][]ScoreEvent
+	scoreHistory       map[string][]float64
+	friendships        map[string]map[string]Friendship
+	chats              map[string]Chat
+	directChats        map[string]string
+	chatMessages       map[string][]ChatMessage
+	companies          map[string]Company
+	jobs               map[string]Job
+	shortlists         []HRShortlist
+	aiInteractions     []AIInteraction
+	plans              map[string]Plan
+	subscriptions      map[string]Subscription
+	candidateUnlocks   map[string]map[string]CandidateUnlock
+	candidateInvites   map[string]map[string]CandidateInvite
+	aiUsageEvents      map[string][]AIUsageEvent
+	cosmeticCatalog    map[string]CosmeticCatalogItem
+	userCosmetics      map[string]map[string]UserCosmetic
+	equippedCosmetics  map[string]map[string]EquippedCosmetic
+	trustedProxyCIDRs  []netip.Prefix
+	trustedProxySecret string
 }
 
 type RegisterRequest struct {
@@ -94,7 +98,7 @@ type LoginRequest struct {
 type AuthResponse struct {
 	User         User      `json:"user"`
 	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
+	RefreshToken string    `json:"-"`
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
@@ -253,6 +257,36 @@ func (a *App) SetChallengeRunner(engine runsvc.Engine) {
 	a.runner = engine
 }
 
+func (a *App) SetTrustedProxyPolicy(secret string, cidrs []string) error {
+	parsed := make([]netip.Prefix, 0, len(cidrs))
+	for _, candidate := range cidrs {
+		value := strings.TrimSpace(candidate)
+		if value == "" {
+			continue
+		}
+		if strings.Contains(value, "/") {
+			prefix, err := netip.ParsePrefix(value)
+			if err != nil {
+				return fmt.Errorf("parse trusted proxy cidr %q: %w", value, err)
+			}
+			parsed = append(parsed, prefix)
+			continue
+		}
+		addr, err := netip.ParseAddr(value)
+		if err != nil {
+			return fmt.Errorf("parse trusted proxy address %q: %w", value, err)
+		}
+		bits := 32
+		if addr.Is6() {
+			bits = 128
+		}
+		parsed = append(parsed, netip.PrefixFrom(addr, bits))
+	}
+	a.trustedProxySecret = strings.TrimSpace(secret)
+	a.trustedProxyCIDRs = parsed
+	return nil
+}
+
 func (a *App) Close() error {
 	if a == nil || a.store == nil {
 		return nil
@@ -263,7 +297,6 @@ func (a *App) Close() error {
 func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(a.observeRequests)
 	r.Use(middleware.Recoverer)
 
@@ -275,11 +308,11 @@ func (a *App) Router() http.Handler {
 	r.Get("/metrics", a.handleMetrics)
 	a.mountFrontend(r)
 
-		r.Route("/v1", func(r chi.Router) {
-			r.With(a.rateLimitByIP("auth-register", 10, time.Minute)).Post("/auth/register", a.handleRegister)
-			r.With(a.rateLimitByIP("auth-login", 30, time.Minute)).Post("/auth/login", a.handleLogin)
-			r.With(a.rateLimitByIP("auth-refresh", 30, time.Minute)).Post("/auth/refresh", a.handleRefresh)
-			r.With(a.rateLimitByIP("auth-logout", 60, time.Minute)).Post("/auth/logout", a.handleLogout)
+	r.Route("/v1", func(r chi.Router) {
+		r.With(a.rateLimitByIP("auth-register", 10, time.Minute)).Post("/auth/register", a.handleRegister)
+		r.With(a.rateLimitByIP("auth-login", 30, time.Minute)).Post("/auth/login", a.handleLogin)
+		r.With(a.rateLimitByIP("auth-refresh", 30, time.Minute)).Post("/auth/refresh", a.handleRefresh)
+		r.With(a.rateLimitByIP("auth-logout", 60, time.Minute)).Post("/auth/logout", a.handleLogout)
 
 		r.Group(func(r chi.Router) {
 			r.Use(a.requireAuth)
@@ -1083,7 +1116,7 @@ func (a *App) requireRoles(roles ...Role) func(http.Handler) http.Handler {
 
 func (a *App) rateLimitByIP(scope string, limit int, window time.Duration) func(http.Handler) http.Handler {
 	return a.rateLimitMiddleware(scope, limit, window, func(r *http.Request) (string, error) {
-		if ip := strings.TrimSpace(realIP(r)); ip != "" {
+		if ip := strings.TrimSpace(a.realIP(r)); ip != "" {
 			return ip, nil
 		}
 		return "unknown", nil

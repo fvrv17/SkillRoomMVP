@@ -68,9 +68,13 @@ func TestPersistentAppRestoresStateAcrossRestart(t *testing.T) {
 	reloaded := newPersistentTestApp(t, dsn)
 	reloadedRouter := reloaded.Router()
 
-	refreshResp := performJSON(t, reloadedRouter, http.MethodPost, "/v1/auth/refresh", RefreshRequest{
-		RefreshToken: auth.RefreshToken,
-	}, "")
+	refreshResp := performRequestWithOptions(t, reloadedRouter, requestOptions{
+		Method: http.MethodPost,
+		Path:   "/v1/auth/refresh",
+		Cookies: []*http.Cookie{
+			{Name: refreshTokenCookieName, Value: auth.RefreshToken},
+		},
+	})
 	if refreshResp.Code != http.StatusOK {
 		t.Fatalf("refresh after restart: %d", refreshResp.Code)
 	}
@@ -269,7 +273,12 @@ func newPersistentTestApp(t *testing.T, dsn string) *App {
 	return app
 }
 
-func registerAndCaptureAuth(t *testing.T, router http.Handler, req RegisterRequest) AuthResponse {
+type capturedAuth struct {
+	AuthResponse
+	RefreshToken string
+}
+
+func registerAndCaptureAuth(t *testing.T, router http.Handler, req RegisterRequest) capturedAuth {
 	t.Helper()
 
 	resp := performJSON(t, router, http.MethodPost, "/v1/auth/register", req, "")
@@ -280,7 +289,11 @@ func registerAndCaptureAuth(t *testing.T, router http.Handler, req RegisterReque
 	if err := json.NewDecoder(resp.Body).Decode(&auth); err != nil {
 		t.Fatalf("decode auth response: %v", err)
 	}
-	return auth
+	refreshCookie := findCookie(t, resp, refreshTokenCookieName)
+	if refreshCookie == nil {
+		t.Fatal("expected refresh cookie to be set")
+	}
+	return capturedAuth{AuthResponse: auth, RefreshToken: refreshCookie.Value}
 }
 
 func performRegisterFromIP(t *testing.T, router http.Handler, email, username, remoteAddr string) *httptest.ResponseRecorder {
@@ -297,23 +310,53 @@ func performRegisterFromIP(t *testing.T, router http.Handler, email, username, r
 func performJSONWithRemoteAddr(t *testing.T, router http.Handler, method, path string, body any, token, remoteAddr string) *httptest.ResponseRecorder {
 	t.Helper()
 
+	return performRequestWithOptions(t, router, requestOptions{
+		Method:     method,
+		Path:       path,
+		Body:       body,
+		Token:      token,
+		RemoteAddr: remoteAddr,
+	})
+}
+
+type requestOptions struct {
+	Method     string
+	Path       string
+	Body       any
+	Token      string
+	RemoteAddr string
+	Headers    http.Header
+	Cookies    []*http.Cookie
+}
+
+func performRequestWithOptions(t *testing.T, router http.Handler, opts requestOptions) *httptest.ResponseRecorder {
+	t.Helper()
+
 	var payload strings.Builder
-	if body != nil {
-		encoded, err := json.Marshal(body)
+	if opts.Body != nil {
+		encoded, err := json.Marshal(opts.Body)
 		if err != nil {
 			t.Fatalf("marshal body: %v", err)
 		}
 		payload.Write(encoded)
 	}
-	req := httptest.NewRequest(method, path, strings.NewReader(payload.String()))
-	if body != nil {
+	req := httptest.NewRequest(opts.Method, opts.Path, strings.NewReader(payload.String()))
+	if opts.Body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if opts.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+opts.Token)
 	}
-	if remoteAddr != "" {
-		req.RemoteAddr = remoteAddr
+	for key, values := range opts.Headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	for _, cookie := range opts.Cookies {
+		req.AddCookie(cookie)
+	}
+	if opts.RemoteAddr != "" {
+		req.RemoteAddr = opts.RemoteAddr
 	}
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)

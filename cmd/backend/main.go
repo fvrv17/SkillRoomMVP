@@ -44,6 +44,9 @@ func main() {
 		log.Printf("backend ai provider: deterministic fallback")
 	}
 	app.SetChallengeRunner(runsvc.NewHTTPClient(cfg.RunnerBaseURL, cfg.RunnerTimeout))
+	if err := app.SetTrustedProxyPolicy(cfg.ProxySecret, cfg.TrustedProxyCIDRs); err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("backend runner: remote %s", cfg.RunnerBaseURL)
 
 	server := &http.Server{

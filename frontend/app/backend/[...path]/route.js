@@ -1,4 +1,5 @@
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || "http://backend:8080";
+const BACKEND_PROXY_SECRET = process.env.BACKEND_PROXY_SECRET || "";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,9 @@ async function forward(request, { params }) {
   headers.delete("host");
   headers.delete("connection");
   headers.delete("content-length");
+  if (BACKEND_PROXY_SECRET) {
+    headers.set("X-SkillRoom-Proxy-Secret", BACKEND_PROXY_SECRET);
+  }
 
   const init = {
     method: request.method,

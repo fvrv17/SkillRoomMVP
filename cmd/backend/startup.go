@@ -28,6 +28,8 @@ type startupConfig struct {
 	RunnerBaseURL      string
 	RunnerTimeout      time.Duration
 	AllowInsecureBoot  bool
+	TrustedProxyCIDRs  []string
+	ProxySecret        string
 }
 
 func loadStartupConfig() (startupConfig, error) {
@@ -51,6 +53,8 @@ func loadStartupConfig() (startupConfig, error) {
 		RunnerBaseURL:      config.String("RUNNER_BASE_URL", ""),
 		RunnerTimeout:      config.Duration("RUNNER_TIMEOUT", 5*time.Second),
 		AllowInsecureBoot:  config.Bool("ALLOW_INSECURE_BOOT", false),
+		TrustedProxyCIDRs:  splitCSV(config.String("TRUSTED_PROXY_CIDRS", "")),
+		ProxySecret:        config.String("BACKEND_PROXY_SECRET", ""),
 	}
 	return cfg, cfg.Validate()
 }
@@ -101,4 +105,19 @@ func (c startupConfig) InsecureWarnings() []string {
 		warnings = append(warnings, "AUTH_TOKEN_SECRET is using an insecure development value")
 	}
 	return warnings
+}
+
+func splitCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	raw := strings.Split(value, ",")
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

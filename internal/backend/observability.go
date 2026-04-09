@@ -2,9 +2,12 @@ package backend
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -148,7 +151,7 @@ func (a *App) observeRequests(next http.Handler) http.Handler {
 		a.metrics.Observe(r.Method, route, recorder.status, recorder.bytes, duration)
 
 		requestID := middleware.GetReqID(r.Context())
-		remoteIP := realIP(r)
+		remoteIP := a.realIP(r)
 		log.Printf(
 			"request_id=%s method=%s route=%s status=%d duration_ms=%d bytes=%d remote_ip=%s",
 			requestID,
@@ -222,7 +225,11 @@ func (a *App) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(a.metrics.Text()))
 }
 
-func realIP(r *http.Request) string {
+func (a *App) realIP(r *http.Request) string {
+	remoteIP := socketIP(r)
+	if !a.trustForwardedHeaders(r, remoteIP) {
+		return remoteIP
+	}
 	for _, header := range []string{"X-Forwarded-For", "X-Real-IP"} {
 		value := strings.TrimSpace(r.Header.Get(header))
 		if value == "" {
@@ -233,13 +240,44 @@ func realIP(r *http.Request) string {
 		}
 		return value
 	}
+	return remoteIP
+}
+
+func (a *App) trustForwardedHeaders(r *http.Request, remoteIP string) bool {
+	if r == nil {
+		return false
+	}
+	if a.trustedProxySecret != "" {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get(proxySecretHeaderName)), []byte(a.trustedProxySecret)) == 1 {
+			return true
+		}
+	}
+	if len(a.trustedProxyCIDRs) == 0 {
+		return false
+	}
+	addr, err := netip.ParseAddr(strings.TrimSpace(remoteIP))
+	if err != nil {
+		return false
+	}
+	for _, prefix := range a.trustedProxyCIDRs {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func socketIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
 	hostPort := strings.TrimSpace(r.RemoteAddr)
 	if hostPort == "" {
 		return ""
 	}
-	host, _, found := strings.Cut(hostPort, ":")
-	if found && host != "" {
-		return host
+	host, _, err := net.SplitHostPort(hostPort)
+	if err == nil {
+		return strings.Trim(host, "[]")
 	}
-	return hostPort
+	return strings.Trim(hostPort, "[]")
 }

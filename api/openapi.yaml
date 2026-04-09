@@ -35,7 +35,7 @@ paths:
               country: US
       responses:
         '201':
-          description: Auth tokens for the newly registered user
+          description: Access token response plus auth cookies for the newly registered user
           content:
             application/json:
               schema:
@@ -54,7 +54,7 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
       responses:
         '200':
-          description: Auth tokens
+          description: Access token response plus auth cookies
           content:
             application/json:
               schema:
@@ -78,7 +78,7 @@ paths:
               refresh_token: rfr_example
       responses:
         '200':
-          description: Refreshed auth tokens and rotated cookies
+          description: Refreshed access token response and rotated auth cookies
           content:
             application/json:
               schema:
@@ -947,8 +947,6 @@ components:
         user:
           $ref: '#/components/schemas/User'
         access_token:
-          type: string
-        refresh_token:
           type: string
         expires_at:
           type: string

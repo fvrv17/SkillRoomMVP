@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -289,6 +290,13 @@ func TestAuthSupportsCookieRefreshAndLogout(t *testing.T) {
 	if registerResp.Code != http.StatusCreated {
 		t.Fatalf("register failed: %d", registerResp.Code)
 	}
+	var registerPayload map[string]any
+	if err := json.NewDecoder(registerResp.Body).Decode(&registerPayload); err != nil {
+		t.Fatalf("decode register payload: %v", err)
+	}
+	if _, ok := registerPayload["refresh_token"]; ok {
+		t.Fatal("refresh_token should not be present in auth response body")
+	}
 	accessCookie := findCookie(t, registerResp, accessTokenCookieName)
 	refreshCookie := findCookie(t, registerResp, refreshTokenCookieName)
 	if accessCookie == nil || refreshCookie == nil {
@@ -310,6 +318,13 @@ func TestAuthSupportsCookieRefreshAndLogout(t *testing.T) {
 	router.ServeHTTP(refreshResp, refreshReq)
 	if refreshResp.Code != http.StatusOK {
 		t.Fatalf("refresh via cookie failed: %d", refreshResp.Code)
+	}
+	var refreshPayload map[string]any
+	if err := json.NewDecoder(refreshResp.Body).Decode(&refreshPayload); err != nil {
+		t.Fatalf("decode refresh payload: %v", err)
+	}
+	if _, ok := refreshPayload["refresh_token"]; ok {
+		t.Fatal("refresh_token should not be present after refresh")
 	}
 	nextAccess := findCookie(t, refreshResp, accessTokenCookieName)
 	nextRefresh := findCookie(t, refreshResp, refreshTokenCookieName)
@@ -357,6 +372,127 @@ func TestAuthRateLimitUsesStableClientIP(t *testing.T) {
 	}, "", "203.0.113.10:49999")
 	if limitedResp.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected stable IP rate limit to trigger, got %d", limitedResp.Code)
+	}
+}
+
+func TestAuthRateLimitIgnoresUntrustedForwardedHeaders(t *testing.T) {
+	app := newTestApp()
+	router := app.Router()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.RemoteAddr = "198.51.100.77:9000"
+	req.Header.Set("X-Forwarded-For", "203.0.113.1")
+	if got := app.realIP(req); got != "198.51.100.77" {
+		t.Fatalf("expected socket IP for untrusted forwarded headers, got %q", got)
+	}
+
+	for index := 0; index < 10; index++ {
+		resp := performRequestWithOptions(t, router, requestOptions{
+			Method: http.MethodPost,
+			Path:   "/v1/auth/register",
+			Body: RegisterRequest{
+				Email:    fmt.Sprintf("spoofed-%d@example.com", index),
+				Username: fmt.Sprintf("spoofed-%d", index),
+				Password: "password123",
+				Country:  "US",
+				Role:     RoleUser,
+			},
+			RemoteAddr: "198.51.100.77:9000",
+			Headers: http.Header{
+				"X-Forwarded-For": []string{fmt.Sprintf("203.0.113.%d", index)},
+			},
+		})
+		if resp.Code != http.StatusCreated {
+			t.Fatalf("register %d status: %d", index+1, resp.Code)
+		}
+	}
+
+	limitedResp := performRequestWithOptions(t, router, requestOptions{
+		Method: http.MethodPost,
+		Path:   "/v1/auth/register",
+		Body: RegisterRequest{
+			Email:    "spoofed-overlimit@example.com",
+			Username: "spoofed-overlimit",
+			Password: "password123",
+			Country:  "US",
+			Role:     RoleUser,
+		},
+		RemoteAddr: "198.51.100.77:9000",
+		Headers: http.Header{
+			"X-Forwarded-For": []string{"198.18.0.55"},
+		},
+	})
+	if limitedResp.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for untrusted spoofed forwarded headers, got %d", limitedResp.Code)
+	}
+}
+
+func TestAuthRateLimitUsesTrustedForwardedHeaders(t *testing.T) {
+	app := newTestApp()
+	if err := app.SetTrustedProxyPolicy("proxy-secret", nil); err != nil {
+		t.Fatalf("set trusted proxy policy: %v", err)
+	}
+	router := app.Router()
+
+	for index := 0; index < 10; index++ {
+		resp := performRequestWithOptions(t, router, requestOptions{
+			Method: http.MethodPost,
+			Path:   "/v1/auth/register",
+			Body: RegisterRequest{
+				Email:    fmt.Sprintf("trusted-%d@example.com", index),
+				Username: fmt.Sprintf("trusted-%d", index),
+				Password: "password123",
+				Country:  "US",
+				Role:     RoleUser,
+			},
+			RemoteAddr: "10.10.10.10:7000",
+			Headers: http.Header{
+				"X-Forwarded-For":     []string{"203.0.113.20"},
+				proxySecretHeaderName: []string{"proxy-secret"},
+			},
+		})
+		if resp.Code != http.StatusCreated {
+			t.Fatalf("trusted register %d status: %d", index+1, resp.Code)
+		}
+	}
+
+	limitedResp := performRequestWithOptions(t, router, requestOptions{
+		Method: http.MethodPost,
+		Path:   "/v1/auth/register",
+		Body: RegisterRequest{
+			Email:    "trusted-overlimit@example.com",
+			Username: "trusted-overlimit",
+			Password: "password123",
+			Country:  "US",
+			Role:     RoleUser,
+		},
+		RemoteAddr: "10.10.10.10:7000",
+		Headers: http.Header{
+			"X-Forwarded-For":     []string{"203.0.113.20"},
+			proxySecretHeaderName: []string{"proxy-secret"},
+		},
+	})
+	if limitedResp.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for trusted forwarded ip over limit, got %d", limitedResp.Code)
+	}
+
+	otherClientResp := performRequestWithOptions(t, router, requestOptions{
+		Method: http.MethodPost,
+		Path:   "/v1/auth/register",
+		Body: RegisterRequest{
+			Email:    "trusted-other@example.com",
+			Username: "trusted-other",
+			Password: "password123",
+			Country:  "US",
+			Role:     RoleUser,
+		},
+		RemoteAddr: "10.10.10.10:7000",
+		Headers: http.Header{
+			"X-Forwarded-For":     []string{"203.0.113.21"},
+			proxySecretHeaderName: []string{"proxy-secret"},
+		},
+	})
+	if otherClientResp.Code != http.StatusCreated {
+		t.Fatalf("expected distinct forwarded client ip to have separate rate bucket, got %d", otherClientResp.Code)
 	}
 }
 
