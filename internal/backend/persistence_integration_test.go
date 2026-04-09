@@ -171,7 +171,7 @@ func TestRedisOpsStoreExercisesCacheAndRateLimit(t *testing.T) {
 	}
 
 	dockerBinary := requireDockerDaemon(t)
-	redisContainer := startDockerContainer(t, dockerBinary, "redis:7-alpine", "-P", "--save", "", "--appendonly", "no")
+	redisContainer := startDockerContainer(t, dockerBinary, "redis:7-alpine", "-P", "--", "--save", "", "--appendonly", "no")
 	redisAddr := net.JoinHostPort("127.0.0.1", dockerMappedPort(t, dockerBinary, redisContainer, "6379/tcp"))
 	store := NewRedisOpsStore(redisAddr, "", 0)
 
@@ -220,7 +220,7 @@ func TestRedisRateLimitIsSharedAcrossAppInstances(t *testing.T) {
 	}
 
 	dockerBinary := requireDockerDaemon(t)
-	redisContainer := startDockerContainer(t, dockerBinary, "redis:7-alpine", "-P", "--save", "", "--appendonly", "no")
+	redisContainer := startDockerContainer(t, dockerBinary, "redis:7-alpine", "-P", "--", "--save", "", "--appendonly", "no")
 	redisAddr := net.JoinHostPort("127.0.0.1", dockerMappedPort(t, dockerBinary, redisContainer, "6379/tcp"))
 
 	storeOne := NewRedisOpsStore(redisAddr, "", 0)
@@ -338,8 +338,18 @@ func startDockerContainer(t *testing.T, dockerBinary string, image string, args 
 
 	containerName := fmt.Sprintf("skillroom-it-%d", time.Now().UTC().UnixNano())
 	commandArgs := []string{"run", "-d", "--rm", "--name", containerName}
-	commandArgs = append(commandArgs, args...)
+	dockerArgs := args
+	containerArgs := []string{}
+	for index, arg := range args {
+		if arg == "--" {
+			dockerArgs = args[:index]
+			containerArgs = args[index+1:]
+			break
+		}
+	}
+	commandArgs = append(commandArgs, dockerArgs...)
 	commandArgs = append(commandArgs, image)
+	commandArgs = append(commandArgs, containerArgs...)
 
 	output, err := runDockerCommand(dockerBinary, commandArgs...)
 	if err != nil {
