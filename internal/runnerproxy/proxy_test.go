@@ -1,7 +1,9 @@
 package runnerproxy
 
 import (
+	"bytes"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -37,5 +39,80 @@ func TestAllowedDockerRequest(t *testing.T) {
 func TestNormalizeDockerPathStripsVersionPrefix(t *testing.T) {
 	if got := normalizeDockerPath("/v1.44/containers/create"); got != "/containers/create" {
 		t.Fatalf("unexpected normalized path: %s", got)
+	}
+}
+
+func TestValidateDockerRequestAllowsExpectedContainerCreate(t *testing.T) {
+	proxy := NewWithConfig(Config{
+		AllowedImage:    "deploy-runner:latest",
+		AllowedCommands: []string{"node /opt/skillroom-runtime/run-evaluation.mjs"},
+	})
+	body := []byte(`{
+		"Image":"deploy-runner:latest",
+		"WorkingDir":"/workspace",
+		"User":"0:0",
+		"Entrypoint":["sh"],
+		"Cmd":["-lc","node /opt/skillroom-runtime/run-evaluation.mjs"],
+		"HostConfig":{
+			"NetworkMode":"none",
+			"NanoCpus":500000000,
+			"Memory":268435456,
+			"PidsLimit":512,
+			"CapDrop":["ALL"],
+			"SecurityOpt":["no-new-privileges"],
+			"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}]
+		}
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1.45/containers/create", bytes.NewReader(body))
+
+	if err := proxy.validateDockerRequest(req); err != nil {
+		t.Fatalf("expected create body to be allowed, got %v", err)
+	}
+}
+
+func TestValidateDockerRequestRejectsUnexpectedContainerCreateBody(t *testing.T) {
+	proxy := NewWithConfig(Config{
+		AllowedImage:    "deploy-runner:latest",
+		AllowedCommands: []string{"node /opt/skillroom-runtime/run-evaluation.mjs"},
+	})
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "wrong image",
+			body: `{"Image":"evil:latest","WorkingDir":"/workspace","User":"0:0","Entrypoint":["sh"],"Cmd":["-lc","node /opt/skillroom-runtime/run-evaluation.mjs"],"HostConfig":{"NetworkMode":"none","NanoCpus":500000000,"Memory":268435456,"PidsLimit":512,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}]}}`,
+		},
+		{
+			name: "privileged via unknown field",
+			body: `{"Image":"deploy-runner:latest","WorkingDir":"/workspace","User":"0:0","Entrypoint":["sh"],"Cmd":["-lc","node /opt/skillroom-runtime/run-evaluation.mjs"],"HostConfig":{"NetworkMode":"none","NanoCpus":500000000,"Memory":268435456,"PidsLimit":512,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}],"Privileged":true}}`,
+		},
+		{
+			name: "unexpected command",
+			body: `{"Image":"deploy-runner:latest","WorkingDir":"/workspace","User":"0:0","Entrypoint":["sh"],"Cmd":["-lc","apk add curl"],"HostConfig":{"NetworkMode":"none","NanoCpus":500000000,"Memory":268435456,"PidsLimit":512,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}]}}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1.45/containers/create", bytes.NewBufferString(tc.body))
+			if err := proxy.validateDockerRequest(req); err == nil {
+				t.Fatalf("expected create body to be rejected")
+			}
+		})
+	}
+}
+
+func TestValidateDockerRequestRejectsUnexpectedArchiveAndLogQueries(t *testing.T) {
+	proxy := NewWithConfig(Config{})
+
+	archiveReq := httptest.NewRequest(http.MethodPut, "/v1.45/containers/test/archive?path=/etc", nil)
+	if err := proxy.validateDockerRequest(archiveReq); err == nil {
+		t.Fatalf("expected archive path to be rejected")
+	}
+
+	logReq := httptest.NewRequest(http.MethodGet, "/v1.45/containers/test/logs?stdout=1&stderr=0", nil)
+	if err := proxy.validateDockerRequest(logReq); err == nil {
+		t.Fatalf("expected invalid log query to be rejected")
 	}
 }

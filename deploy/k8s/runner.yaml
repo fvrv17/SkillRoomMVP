@@ -43,6 +43,10 @@ spec:
           env:
             - name: RUNNER_ADDR
               value: ":8081"
+            - name: RUNNER_SANDBOX_IMAGE
+              value: "ghcr.io/fvrv17/mvp-runner:latest"
+            - name: RUNNER_SANDBOX_COMMAND
+              value: "node /opt/skillroom-runtime/run-evaluation.mjs"
             - name: RUNNER_DOCKER_HOST
               value: "http://127.0.0.1:2375"
           readinessProbe:
@@ -75,6 +79,14 @@ spec:
               value: ":2375"
             - name: RUNNER_DOCKER_SOCKET
               value: "/var/run/docker.sock"
+            - name: RUNNER_SANDBOX_IMAGE
+              value: "ghcr.io/fvrv17/mvp-runner:latest"
+            - name: RUNNER_SANDBOX_COMMAND
+              value: "node /opt/skillroom-runtime/run-evaluation.mjs"
+            - name: RUNNER_DOCKER_PROXY_MAX_MEMORY_MB
+              value: "512"
+            - name: RUNNER_DOCKER_PROXY_MAX_PIDS
+              value: "512"
           readinessProbe:
             httpGet:
               path: /readyz

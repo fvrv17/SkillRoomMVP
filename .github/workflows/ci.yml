@@ -23,9 +23,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Run Go tests
         run: go test -mod=mod ./...
+
+      - name: Install frontend test dependencies
+        run: npm --prefix frontend ci
 
       - name: Build frontend container
         run: docker build -f deploy/frontend.Dockerfile -t mvp-frontend:ci .
@@ -40,13 +45,13 @@ jobs:
         run: docker compose -f deploy/docker-compose.yml config
 
       - name: Install Playwright browser
-        run: npx -y playwright@1.52.0 install --with-deps chromium
+        run: npm --prefix frontend run test:e2e:install -- --with-deps
 
       - name: Start stack for browser smoke
         run: docker compose -f deploy/docker-compose.yml up -d --build
 
       - name: Run browser smoke tests
-        run: npx -y playwright@1.52.0 test -c frontend/playwright.config.mjs
+        run: npm --prefix frontend run test:e2e
 
       - name: Stop stack
         if: always()

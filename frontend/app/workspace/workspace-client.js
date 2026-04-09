@@ -357,6 +357,7 @@ export default function WorkspaceClient() {
         ...current,
         monetization: payload.monetization || current.monetization,
       }));
+      setActiveView("candidates");
     } catch (candidateError) {
       setError(candidateError instanceof Error ? candidateError.message : "Unable to load candidate detail");
     } finally {
@@ -728,6 +729,7 @@ export default function WorkspaceClient() {
           <button
             key={item.id}
             type="button"
+            data-testid={`nav-${item.id}`}
             className={activeView === item.id ? "nav-button active" : "nav-button"}
             onClick={() => setActiveView(item.id)}
           >
@@ -809,7 +811,7 @@ export default function WorkspaceClient() {
             <>
               <div className="card stats-card">
                 <p className="eyebrow">Skill score</p>
-                <h2>{formatNumber(profile.current_skill_score)}</h2>
+                <h2 data-testid="skill-score">{formatNumber(profile.current_skill_score)}</h2>
                 <div className="stats-row">
                   <Stat label="Confidence" value={formatNumber(profile.confidence_score)} />
                   <Stat label="Global %" value={formatNumber(profile.percentile_global)} />
@@ -887,13 +889,14 @@ export default function WorkspaceClient() {
               </div>
             </div>
             <div className="template-list">
-              {templates.map((template) => (
-                <button
-                  key={template.id}
-                  type="button"
-                  className={currentChallenge?.templateId === template.id ? "template-card active" : "template-card"}
-                  onClick={() => handleStartChallenge(template.id)}
-                >
+                {templates.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    data-testid={`template-${template.id}`}
+                    className={currentChallenge?.templateId === template.id ? "template-card active" : "template-card"}
+                    onClick={() => handleStartChallenge(template.id)}
+                  >
                   <div className="template-card__header">
                     <span>{labelize(template.category)}</span>
                     <strong>D{template.difficulty}</strong>
@@ -952,6 +955,7 @@ export default function WorkspaceClient() {
                       className="editor-preview"
                     />
                     <textarea
+                      data-testid="challenge-editor"
                       className="code-editor"
                       value={editorContent}
                       onChange={(event) => updateEditorContent(event.target.value)}
@@ -972,10 +976,10 @@ export default function WorkspaceClient() {
                   <button type="button" className="secondary-button" onClick={handleHint} disabled={busyAction !== ""}>
                     {busyAction === "hint" ? "Loading hint..." : "Get hint"}
                   </button>
-                  <button type="button" className="secondary-button" onClick={handleRunChecks} disabled={busyAction !== ""}>
+                  <button type="button" data-testid="run-checks" className="secondary-button" onClick={handleRunChecks} disabled={busyAction !== ""}>
                     {busyAction === "run" ? "Running..." : "Run checks"}
                   </button>
-                  <button type="button" className="primary-button" onClick={handleSubmit} disabled={busyAction !== ""}>
+                  <button type="button" data-testid="submit-solution" className="primary-button" onClick={handleSubmit} disabled={busyAction !== ""}>
                     {busyAction === "submit" ? "Submitting..." : "Submit solution"}
                   </button>
                 </div>
@@ -1151,7 +1155,7 @@ export default function WorkspaceClient() {
                 <span>Action</span>
               </div>
               {leaderboard.map((candidate, index) => (
-                <div key={`${candidate.user_id}-${index}`} className="ranking-row">
+                <div key={`${candidate.user_id}-${index}`} className="ranking-row" data-testid={`leaderboard-row-${candidate.user_id}`}>
                   <span>#{index + 1}</span>
                   <span>{candidate.username}</span>
                   <span>{formatNumber(candidate.summary?.score ?? candidate.current_skill_score)}</span>
@@ -1160,6 +1164,7 @@ export default function WorkspaceClient() {
                   <div className="candidate-card__actions">
                     <button
                       type="button"
+                      data-testid={`leaderboard-open-${candidate.user_id}`}
                       className="secondary-button"
                       onClick={() => handleOpenCandidate(candidate.user_id)}
                       disabled={busyAction === `candidate:${candidate.user_id}`}
@@ -1231,7 +1236,7 @@ export default function WorkspaceClient() {
                 ) : null}
               </div>
               {selectedCandidate ? (
-                <div className="card card--span-2 candidate-detail-card">
+                <div className="card card--span-2 candidate-detail-card" data-testid="candidate-detail">
                   <div className="candidate-card__header">
                     <div>
                       <p className="eyebrow">Candidate detail</p>
@@ -1288,6 +1293,7 @@ export default function WorkspaceClient() {
                       <p>{`Locked fields: ${(selectedCandidate.locked_fields || []).map(labelize).join(", ")}`}</p>
                       <button
                         type="button"
+                        data-testid="candidate-unlock"
                         className="primary-button"
                         onClick={() => handleUnlockCandidate(selectedCandidate.candidate?.user_id)}
                         disabled={busyAction === `unlock:${selectedCandidate.candidate?.user_id}` || !selectedCandidate.candidate?.access?.can_unlock}
@@ -1300,6 +1306,7 @@ export default function WorkspaceClient() {
                     <div className="candidate-card__actions">
                       <button
                         type="button"
+                        data-testid="candidate-open-room"
                         className="secondary-button"
                         onClick={() => handleOpenCandidateRoom(selectedCandidate.candidate?.user_id)}
                         disabled={busyAction === `room:${selectedCandidate.candidate?.user_id}`}
@@ -1308,6 +1315,7 @@ export default function WorkspaceClient() {
                       </button>
                       <button
                         type="button"
+                        data-testid="candidate-invite"
                         className="primary-button"
                         onClick={() => handleInviteCandidate(selectedCandidate.candidate?.user_id)}
                         disabled={selectedCandidate.candidate?.access?.is_invited || !selectedCandidate.candidate?.access?.can_invite || busyAction === `invite:${selectedCandidate.candidate?.user_id}`}
@@ -1405,6 +1413,7 @@ export default function WorkspaceClient() {
                     </button>
                     <button
                       type="button"
+                      data-testid="candidate-invite"
                       className="primary-button"
                       onClick={() => handleInviteCandidate(selectedCandidate.candidate?.user_id)}
                       disabled={selectedCandidate.candidate?.access?.is_invited || !selectedCandidate.candidate?.access?.can_invite || busyAction === `invite:${selectedCandidate.candidate?.user_id}`}
@@ -1870,6 +1879,7 @@ function RoomSlot({ slot, item, interactive, selected, popoverVisible, onSelect 
     >
       <button
         type="button"
+        data-testid={`room-slot-${slot.code}`}
         className="room-slot__button"
         onClick={() => onSelect?.(slot.code)}
         disabled={!interactive}
@@ -1938,7 +1948,7 @@ function RoomInspector({
   const presentationMode = roomPresentationMode(slot, item);
   const achievementEntries = roomAchievementEntries(item);
   return (
-    <div className="room-inspector__stack">
+    <div className="room-inspector__stack" data-testid="room-inspector">
       <div className="room-inspector__hero">
         <div>
           <p className="room-inspector__skill">{slot.skill}</p>

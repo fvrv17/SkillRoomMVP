@@ -28,6 +28,7 @@ services:
     environment:
       RUNNER_ADDR: ":8081"
       RUNNER_SANDBOX_IMAGE: deploy-runner:latest
+      RUNNER_SANDBOX_COMMAND: "node /opt/skillroom-runtime/run-evaluation.mjs"
       RUNNER_DOCKER_HOST: http://runner-docker-proxy:2375
       RUNNER_CPU_LIMIT: "0.50"
       RUNNER_MEMORY_MB: 256
@@ -55,6 +56,10 @@ services:
     environment:
       RUNNER_DOCKER_PROXY_ADDR: ":2375"
       RUNNER_DOCKER_SOCKET: /var/run/docker.sock
+      RUNNER_SANDBOX_IMAGE: deploy-runner:latest
+      RUNNER_SANDBOX_COMMAND: "node /opt/skillroom-runtime/run-evaluation.mjs"
+      RUNNER_DOCKER_PROXY_MAX_MEMORY_MB: 512
+      RUNNER_DOCKER_PROXY_MAX_PIDS: 512
     expose:
       - "2375"
     volumes:
