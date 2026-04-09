@@ -7,11 +7,19 @@ async function forward(request, { params }) {
   const path = Array.isArray(params.path) ? params.path.join("/") : "";
   const target = new URL(`/${path}`, BACKEND_ORIGIN);
   target.search = request.nextUrl.search;
+  const forwardedProto = request.nextUrl.protocol.replace(":", "") || "http";
 
   const headers = new Headers(request.headers);
   headers.delete("host");
   headers.delete("connection");
   headers.delete("content-length");
+  headers.delete("forwarded");
+  headers.delete("x-forwarded-for");
+  headers.delete("x-forwarded-host");
+  headers.delete("x-forwarded-port");
+  headers.delete("x-real-ip");
+  headers.delete("x-forwarded-proto");
+  headers.set("X-Forwarded-Proto", forwardedProto);
   if (BACKEND_PROXY_SECRET) {
     headers.set("X-SkillRoom-Proxy-Secret", BACKEND_PROXY_SECRET);
   }

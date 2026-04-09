@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/netip"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -35,7 +35,15 @@ const (
 	accessTokenCookieName  = "skillroom_access"
 	refreshTokenCookieName = "skillroom_refresh"
 	proxySecretHeaderName  = "X-SkillRoom-Proxy-Secret"
+	rankingSnapshotTTL     = 30 * time.Second
 )
+
+type rankingSnapshot struct {
+	RefreshedAt  time.Time
+	Global       []RankingEntry
+	ByCountry    map[string][]RankingEntry
+	CandidateIDs []string
+}
 
 type App struct {
 	mu                 sync.RWMutex
@@ -80,6 +88,7 @@ type App struct {
 	equippedCosmetics  map[string]map[string]EquippedCosmetic
 	trustedProxyCIDRs  []netip.Prefix
 	trustedProxySecret string
+	rankingSnapshot    rankingSnapshot
 }
 
 type RegisterRequest struct {
@@ -929,6 +938,7 @@ func (a *App) register(ctx context.Context, req RegisterRequest) (AuthResponse, 
 	if err := a.persistUserMonetizationLocked(ctx, user.ID); err != nil {
 		return AuthResponse{}, err
 	}
+	a.invalidateRankingCachesLocked(ctx, user.ID)
 	return a.mintAuthLocked(ctx, user)
 }
 
@@ -2055,12 +2065,22 @@ func (a *App) createJob(ctx context.Context, ownerUserID, companyID string, req 
 }
 
 func (a *App) searchCandidates(recruiterUserID string, minScore, minConfidence, topPercent float64, activeDays int) ([]CandidateView, MonetizationSummary) {
+	now := time.Now().UTC()
+	if !a.rankingSnapshotFresh(now) {
+		a.mu.Lock()
+		a.ensureRankingSnapshotLocked(now)
+		a.mu.Unlock()
+	}
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	now := time.Now().UTC()
 	var out []CandidateView
 	monetization := a.monetizationSummaryLocked(recruiterUserID)
-	for _, user := range a.users {
+	for _, userID := range a.rankingSnapshot.CandidateIDs {
+		user, ok := a.users[userID]
+		if !ok {
+			continue
+		}
 		if user.Role != RoleUser {
 			continue
 		}
@@ -2078,15 +2098,6 @@ func (a *App) searchCandidates(recruiterUserID string, minScore, minConfidence, 
 		}
 		out = append(out, a.candidatePreviewLocked(recruiterUserID, user, monetization))
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].CurrentSkillScore == out[j].CurrentSkillScore {
-			if out[i].ConfidenceScore == out[j].ConfidenceScore {
-				return out[i].LastActiveAt.After(out[j].LastActiveAt)
-			}
-			return out[i].ConfidenceScore > out[j].ConfidenceScore
-		}
-		return out[i].CurrentSkillScore > out[j].CurrentSkillScore
-	})
 	return out, monetization
 }
 
@@ -2116,18 +2127,87 @@ func (a *App) shortlistCandidate(ctx context.Context, ownerUserID string, req Sh
 }
 
 func (a *App) rankings(kind, country, userID string) []RankingEntry {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.recomputeRankingsLocked()
+	now := time.Now().UTC()
+	if !a.rankingSnapshotFresh(now) {
+		a.mu.Lock()
+		a.ensureRankingSnapshotLocked(now)
+		a.mu.Unlock()
+	}
+
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.rankingsFromSnapshotLocked(kind, country, userID)
+}
+
+func (a *App) recomputeRankingsLocked() {
+	a.ensureRankingSnapshotLocked(time.Now().UTC())
+}
+
+func (a *App) rankingSnapshotFresh(now time.Time) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.rankingSnapshotFreshLocked(now)
+}
+
+func (a *App) rankingSnapshotFreshLocked(now time.Time) bool {
+	return !a.rankingSnapshot.RefreshedAt.IsZero() && now.Sub(a.rankingSnapshot.RefreshedAt) < rankingSnapshotTTL
+}
+
+func (a *App) ensureRankingSnapshotLocked(now time.Time) {
+	if a.rankingSnapshotFreshLocked(now) {
+		return
+	}
 
 	var users []User
+	for _, user := range a.users {
+		if user.Role != RoleUser {
+			continue
+		}
+		decayed := user
+		decayed.Profile.CurrentSkillScore = round2(a.currentSkillScoreLocked(user.ID))
+		a.users[user.ID] = decayed
+		users = append(users, decayed)
+	}
+	sortUsers(users)
+
+	globalEntries := buildRankingEntries(users)
+	candidateIDs := make([]string, 0, len(users))
+	for index, entry := range globalEntries {
+		stored := a.users[entry.UserID]
+		stored.Profile.PercentileGlobal = entry.Percentile
+		a.users[entry.UserID] = stored
+		candidateIDs = append(candidateIDs, users[index].ID)
+	}
+
+	byCountry := map[string][]RankingEntry{}
+	countryBuckets := map[string][]User{}
+	for _, user := range users {
+		countryBuckets[user.Country] = append(countryBuckets[user.Country], user)
+	}
+	for countryCode, bucket := range countryBuckets {
+		sortUsers(bucket)
+		countryEntries := buildRankingEntries(bucket)
+		byCountry[countryCode] = countryEntries
+		for _, entry := range countryEntries {
+			stored := a.users[entry.UserID]
+			stored.Profile.PercentileCountry = entry.Percentile
+			a.users[entry.UserID] = stored
+		}
+	}
+
+	a.rankingSnapshot = rankingSnapshot{
+		RefreshedAt:  now,
+		Global:       globalEntries,
+		ByCountry:    byCountry,
+		CandidateIDs: candidateIDs,
+	}
+	a.updateAllRoomTrophiesLocked()
+}
+
+func (a *App) rankingsFromSnapshotLocked(kind, country, userID string) []RankingEntry {
 	switch kind {
 	case "country":
-		for _, user := range a.users {
-			if user.Role == RoleUser && user.Country == country {
-				users = append(users, user)
-			}
-		}
+		return cloneRankingEntries(a.rankingSnapshot.ByCountry[country])
 	case "friends":
 		friendSet := map[string]struct{}{userID: {}}
 		for peerID, relation := range a.friendships[userID] {
@@ -2135,22 +2215,21 @@ func (a *App) rankings(kind, country, userID string) []RankingEntry {
 				friendSet[peerID] = struct{}{}
 			}
 		}
-		for friendID := range friendSet {
-			user := a.users[friendID]
-			if user.Role == RoleUser {
-				users = append(users, user)
+		filtered := make([]RankingEntry, 0, len(friendSet))
+		for _, entry := range a.rankingSnapshot.Global {
+			if _, ok := friendSet[entry.UserID]; !ok {
+				continue
 			}
+			filtered = append(filtered, entry)
 		}
+		return rerankEntries(filtered)
 	default:
-		for _, user := range a.users {
-			if user.Role == RoleUser {
-				users = append(users, user)
-			}
-		}
+		return cloneRankingEntries(a.rankingSnapshot.Global)
 	}
+}
 
-	sortUsers(users)
-	var entries []RankingEntry
+func buildRankingEntries(users []User) []RankingEntry {
+	entries := make([]RankingEntry, 0, len(users))
 	total := len(users)
 	for index, user := range users {
 		percentile := 100.0
@@ -2172,48 +2251,27 @@ func (a *App) rankings(kind, country, userID string) []RankingEntry {
 	return entries
 }
 
-func (a *App) recomputeRankingsLocked() {
-	var users []User
-	for _, user := range a.users {
-		if user.Role == RoleUser {
-			decayed := user
-			decayed.Profile.CurrentSkillScore = round2(a.currentSkillScoreLocked(user.ID))
-			a.users[user.ID] = decayed
-			users = append(users, decayed)
-		}
+func cloneRankingEntries(entries []RankingEntry) []RankingEntry {
+	if len(entries) == 0 {
+		return nil
 	}
-	sortUsers(users)
-	total := len(users)
-	for index, user := range users {
+	cloned := make([]RankingEntry, len(entries))
+	copy(cloned, entries)
+	return cloned
+}
+
+func rerankEntries(entries []RankingEntry) []RankingEntry {
+	reranked := cloneRankingEntries(entries)
+	total := len(reranked)
+	for index := range reranked {
+		reranked[index].Rank = index + 1
 		percentile := 100.0
 		if total > 1 {
 			percentile = round2((float64(total-index-1) / float64(total-1)) * 100)
 		}
-		profile := user.Profile
-		profile.PercentileGlobal = percentile
-		user.Profile = profile
-		a.users[user.ID] = user
+		reranked[index].Percentile = percentile
 	}
-
-	countryBuckets := map[string][]User{}
-	for _, user := range users {
-		countryBuckets[user.Country] = append(countryBuckets[user.Country], user)
-	}
-	for countryCode, bucket := range countryBuckets {
-		sortUsers(bucket)
-		count := len(bucket)
-		for index, user := range bucket {
-			percentile := 100.0
-			if count > 1 {
-				percentile = round2((float64(count-index-1) / float64(count-1)) * 100)
-			}
-			stored := a.users[user.ID]
-			stored.Profile.PercentileCountry = percentile
-			a.users[user.ID] = stored
-		}
-		_ = countryCode
-	}
-	a.updateAllRoomTrophiesLocked()
+	return reranked
 }
 
 func (a *App) initUserStateLocked(userID string, now time.Time) {
@@ -2761,6 +2819,10 @@ func (a *App) invalidateFriendRankingCaches(ctx context.Context, userIDs ...stri
 }
 
 func (a *App) invalidateRankingCachesLocked(ctx context.Context, userID string) {
+	a.rankingSnapshot.RefreshedAt = time.Time{}
+	a.rankingSnapshot.Global = nil
+	a.rankingSnapshot.ByCountry = nil
+	a.rankingSnapshot.CandidateIDs = nil
 	if a.ops == nil {
 		return
 	}
@@ -3224,7 +3286,8 @@ func (a *App) persistRankingsLocked(ctx context.Context, userID string) error {
 	if a.store == nil {
 		return nil
 	}
-	global := a.rankingsLocked("global", "", "")
+	a.ensureRankingSnapshotLocked(time.Now().UTC())
+	global := a.rankingsFromSnapshotLocked("global", "", "")
 	if err := a.store.UpsertRankingSnapshot(ctx, "global", "", "", global); err != nil {
 		return err
 	}
@@ -3233,7 +3296,7 @@ func (a *App) persistRankingsLocked(ctx context.Context, userID string) error {
 		if user.Role == RoleUser {
 			if _, ok := seenCountries[user.Country]; !ok {
 				seenCountries[user.Country] = struct{}{}
-				countryEntries := a.rankingsLocked("country", user.Country, "")
+				countryEntries := a.rankingsFromSnapshotLocked("country", user.Country, "")
 				if err := a.store.UpsertRankingSnapshot(ctx, "country", user.Country, "", countryEntries); err != nil {
 					return err
 				}
@@ -3241,62 +3304,10 @@ func (a *App) persistRankingsLocked(ctx context.Context, userID string) error {
 		}
 	}
 	if userID != "" {
-		friendEntries := a.rankingsLocked("friends", "", userID)
+		friendEntries := a.rankingsFromSnapshotLocked("friends", "", userID)
 		if err := a.store.UpsertRankingSnapshot(ctx, "friends", "", userID, friendEntries); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func (a *App) rankingsLocked(kind, country, userID string) []RankingEntry {
-	var users []User
-	switch kind {
-	case "country":
-		for _, user := range a.users {
-			if user.Role == RoleUser && user.Country == country {
-				users = append(users, user)
-			}
-		}
-	case "friends":
-		friendSet := map[string]struct{}{userID: {}}
-		for peerID, relation := range a.friendships[userID] {
-			if relation.Status == "accepted" {
-				friendSet[peerID] = struct{}{}
-			}
-		}
-		for friendID := range friendSet {
-			user := a.users[friendID]
-			if user.Role == RoleUser {
-				users = append(users, user)
-			}
-		}
-	default:
-		for _, user := range a.users {
-			if user.Role == RoleUser {
-				users = append(users, user)
-			}
-		}
-	}
-	sortUsers(users)
-	var entries []RankingEntry
-	total := len(users)
-	for index, user := range users {
-		percentile := 100.0
-		if total > 1 {
-			percentile = round2((float64(total-index-1) / float64(total-1)) * 100)
-		}
-		entries = append(entries, RankingEntry{
-			UserID:              user.ID,
-			Username:            user.Username,
-			Country:             user.Country,
-			CurrentSkillScore:   user.Profile.CurrentSkillScore,
-			ConfidenceScore:     user.Profile.ConfidenceScore,
-			Percentile:          percentile,
-			Rank:                index + 1,
-			LastActiveAt:        user.LastActiveAt,
-			CompletedChallenges: user.Profile.CompletedChallenges,
-		})
-	}
-	return entries
 }
