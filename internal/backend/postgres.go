@@ -26,6 +26,8 @@ type CandidateSearchFilters struct {
 	MinConfidence float64
 	TopPercent    float64
 	ActiveDays    int
+	Limit         int
+	Offset        int
 }
 
 func OpenSQLStore(ctx context.Context, dsn string) (*SQLStore, error) {
@@ -769,7 +771,7 @@ func (s *SQLStore) QueryRankingEntries(ctx context.Context, kind, country, userI
 	return s.queryRankingEntries(ctx, query, args...)
 }
 
-func (s *SQLStore) SearchCandidateEntries(ctx context.Context, filters CandidateSearchFilters, now time.Time) ([]RankingEntry, error) {
+func (s *SQLStore) SearchCandidateEntries(ctx context.Context, filters CandidateSearchFilters, now time.Time) ([]RankingEntry, PaginationInfo, error) {
 	args := []any{now}
 	conditions := make([]string, 0, 4)
 	if filters.MinScore > 0 {
@@ -794,7 +796,19 @@ func (s *SQLStore) SearchCandidateEntries(ctx context.Context, filters Candidate
 		filterSQL = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	query := fmt.Sprintf(`
+	limit := filters.Limit
+	if limit <= 0 {
+		limit = hrCandidatePageLimit
+	}
+	if limit > hrPaginationMaxLimit {
+		limit = hrPaginationMaxLimit
+	}
+	offset := filters.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	baseCTE := fmt.Sprintf(`
 		WITH scored AS (
 			SELECT
 				u.id AS user_id,
@@ -856,7 +870,24 @@ func (s *SQLStore) SearchCandidateEntries(ctx context.Context, filters Candidate
 				last_active_at,
 				completed_challenges
 			FROM ranked
+			%s
 		)
+	`, filterSQL)
+
+	countQuery := baseCTE + `
+		SELECT COUNT(*)
+		FROM filtered
+	`
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, PaginationInfo{}, err
+	}
+
+	pageArgs := append(append([]any(nil), args...), limit, offset)
+	limitArg := len(args) + 1
+	offsetArg := len(args) + 2
+	pageQuery := baseCTE + fmt.Sprintf(`
 		SELECT
 			user_id,
 			username,
@@ -868,11 +899,15 @@ func (s *SQLStore) SearchCandidateEntries(ctx context.Context, filters Candidate
 			last_active_at,
 			completed_challenges
 		FROM filtered
-		%s
 		ORDER BY rank
-	`, filterSQL)
+		LIMIT $%d OFFSET $%d
+	`, limitArg, offsetArg)
 
-	return s.queryRankingEntries(ctx, query, args...)
+	entries, err := s.queryRankingEntries(ctx, pageQuery, pageArgs...)
+	if err != nil {
+		return nil, PaginationInfo{}, err
+	}
+	return entries, buildPagination(limit, offset, total), nil
 }
 
 func (s *SQLStore) queryRankingEntries(ctx context.Context, query string, args ...any) ([]RankingEntry, error) {

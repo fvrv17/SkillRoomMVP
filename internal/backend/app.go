@@ -36,6 +36,9 @@ const (
 	refreshTokenCookieName = "skillroom_refresh"
 	proxySecretHeaderName  = "X-SkillRoom-Proxy-Secret"
 	rankingSnapshotTTL     = 30 * time.Second
+	hrCandidatePageLimit   = 6
+	hrLeaderboardPageLimit = 8
+	hrPaginationMaxLimit   = 24
 )
 
 type rankingSnapshot struct {
@@ -415,6 +418,7 @@ func (a *App) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := a.refresh(r.Context(), a.refreshTokenFromRequest(r, req.RefreshToken))
 	if err != nil {
+		a.metrics.IncrementEvent("refresh_failed")
 		a.clearAuthCookies(w, r)
 		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -615,6 +619,7 @@ func (a *App) handleSubmitChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.submitChallenge(r.Context(), user.ID, chi.URLParam(r, "instanceID"), req)
 	if err != nil {
+		a.observeChallengeExecutionError(err)
 		httpx.WriteError(w, challengeExecutionStatus(err), err.Error())
 		return
 	}
@@ -634,6 +639,7 @@ func (a *App) handleRunChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.runChallenge(r.Context(), user.ID, chi.URLParam(r, "instanceID"), req)
 	if err != nil {
+		a.observeChallengeExecutionError(err)
 		httpx.WriteError(w, challengeExecutionStatus(err), err.Error())
 		return
 	}
@@ -818,13 +824,15 @@ func (a *App) handleSearchCandidates(w http.ResponseWriter, r *http.Request) {
 	topPercent, _ := strconv.ParseFloat(r.URL.Query().Get("top_percent"), 64)
 	activeDays, _ := strconv.Atoi(r.URL.Query().Get("active_days"))
 	minConfidence, _ := strconv.ParseFloat(r.URL.Query().Get("min_confidence"), 64)
-	results, monetization, err := a.searchCandidates(r.Context(), user.ID, minScore, minConfidence, topPercent, activeDays)
+	limit, offset := parsePaginationQuery(r, hrCandidatePageLimit)
+	results, pagination, monetization, err := a.searchCandidates(r.Context(), user.ID, minScore, minConfidence, topPercent, activeDays, limit, offset)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"candidates":   results,
+		"pagination":   pagination,
 		"monetization": monetization,
 	})
 }
@@ -835,13 +843,15 @@ func (a *App) handleHRLeaderboard(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	results, monetization, err := a.searchCandidates(r.Context(), user.ID, 0, 0, 0, 0)
+	limit, offset := parsePaginationQuery(r, hrLeaderboardPageLimit)
+	results, pagination, monetization, err := a.searchCandidates(r.Context(), user.ID, 0, 0, 0, 0, limit, offset)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"rankings":     results,
+		"pagination":   pagination,
 		"monetization": monetization,
 	})
 }
@@ -868,9 +878,11 @@ func (a *App) handleUnlockCandidate(w http.ResponseWriter, r *http.Request) {
 	}
 	detail, err := a.unlockCandidate(r.Context(), user.ID, chi.URLParam(r, "userID"))
 	if err != nil {
+		a.metrics.IncrementEvent("candidate_unlock_denied")
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.metrics.IncrementEvent("candidate_unlock_succeeded")
 	httpx.WriteJSON(w, http.StatusCreated, detail)
 }
 
@@ -882,9 +894,11 @@ func (a *App) handleInviteCandidate(w http.ResponseWriter, r *http.Request) {
 	}
 	detail, err := a.inviteCandidate(r.Context(), user.ID, chi.URLParam(r, "userID"))
 	if err != nil {
+		a.metrics.IncrementEvent("candidate_invite_denied")
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.metrics.IncrementEvent("candidate_invite_succeeded")
 	httpx.WriteJSON(w, http.StatusCreated, detail)
 }
 
@@ -2083,13 +2097,15 @@ func (a *App) createJob(ctx context.Context, ownerUserID, companyID string, req 
 	return job, nil
 }
 
-func (a *App) searchCandidates(ctx context.Context, recruiterUserID string, minScore, minConfidence, topPercent float64, activeDays int) ([]CandidateView, MonetizationSummary, error) {
+func (a *App) searchCandidates(ctx context.Context, recruiterUserID string, minScore, minConfidence, topPercent float64, activeDays, limit, offset int) ([]CandidateView, PaginationInfo, MonetizationSummary, error) {
 	if a.store != nil {
 		return a.searchCandidatesSQL(ctx, recruiterUserID, CandidateSearchFilters{
 			MinScore:      minScore,
 			MinConfidence: minConfidence,
 			TopPercent:    topPercent,
 			ActiveDays:    activeDays,
+			Limit:         limit,
+			Offset:        offset,
 		})
 	}
 
@@ -2126,13 +2142,14 @@ func (a *App) searchCandidates(ctx context.Context, recruiterUserID string, minS
 		}
 		out = append(out, a.candidatePreviewLocked(recruiterUserID, user, monetization))
 	}
-	return out, monetization, nil
+	pagination := buildPagination(limit, offset, len(out))
+	return paginateCandidates(out, pagination), pagination, monetization, nil
 }
 
-func (a *App) searchCandidatesSQL(ctx context.Context, recruiterUserID string, filters CandidateSearchFilters) ([]CandidateView, MonetizationSummary, error) {
-	entries, err := a.store.SearchCandidateEntries(ctx, filters, time.Now().UTC())
+func (a *App) searchCandidatesSQL(ctx context.Context, recruiterUserID string, filters CandidateSearchFilters) ([]CandidateView, PaginationInfo, MonetizationSummary, error) {
+	entries, pagination, err := a.store.SearchCandidateEntries(ctx, filters, time.Now().UTC())
 	if err != nil {
-		return nil, MonetizationSummary{}, err
+		return nil, PaginationInfo{}, MonetizationSummary{}, err
 	}
 
 	a.mu.RLock()
@@ -2154,7 +2171,70 @@ func (a *App) searchCandidatesSQL(ctx context.Context, recruiterUserID string, f
 		user.Profile.CompletedChallenges = entry.CompletedChallenges
 		out = append(out, a.candidatePreviewLocked(recruiterUserID, user, monetization))
 	}
-	return out, monetization, nil
+	return out, pagination, monetization, nil
+}
+
+func parsePaginationQuery(r *http.Request, defaultLimit int) (int, int) {
+	limit := defaultLimit
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			limit = parsed
+		}
+	}
+	offset := 0
+	if value := strings.TrimSpace(r.URL.Query().Get("offset")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			offset = parsed
+		}
+	}
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if limit > hrPaginationMaxLimit {
+		limit = hrPaginationMaxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+func buildPagination(limit, offset, total int) PaginationInfo {
+	if limit <= 0 {
+		limit = hrCandidatePageLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if total < 0 {
+		total = 0
+	}
+	return PaginationInfo{
+		Limit:   limit,
+		Offset:  offset,
+		Total:   total,
+		HasMore: offset+limit < total,
+	}
+}
+
+func paginateCandidates(results []CandidateView, pagination PaginationInfo) []CandidateView {
+	if pagination.Offset >= len(results) {
+		return []CandidateView{}
+	}
+	end := pagination.Offset + pagination.Limit
+	if end > len(results) {
+		end = len(results)
+	}
+	return results[pagination.Offset:end]
+}
+
+func (a *App) observeChallengeExecutionError(err error) {
+	switch {
+	case errors.Is(err, errRunnerTimeout):
+		a.metrics.IncrementEvent("runner_timeout")
+	case errors.Is(err, errRunnerUnavailable):
+		a.metrics.IncrementEvent("runner_unavailable")
+	}
 }
 
 func (a *App) shortlistCandidate(ctx context.Context, ownerUserID string, req ShortlistRequest) (HRShortlist, error) {

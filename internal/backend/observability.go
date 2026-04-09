@@ -24,8 +24,9 @@ type AppMetrics struct {
 	activeRequests int64
 	requestsTotal  uint64
 
-	mu    sync.RWMutex
-	stats map[metricKey]*metricValue
+	mu          sync.RWMutex
+	stats       map[metricKey]*metricValue
+	eventTotals map[string]uint64
 }
 
 type metricKey struct {
@@ -48,7 +49,8 @@ type statusRecorder struct {
 
 func NewAppMetrics() *AppMetrics {
 	return &AppMetrics{
-		stats: map[metricKey]*metricValue{},
+		stats:       map[metricKey]*metricValue{},
+		eventTotals: map[string]uint64{},
 	}
 }
 
@@ -72,6 +74,15 @@ func (a *AppMetrics) Observe(method, route string, status, bytes int, duration t
 	entry.Bytes += uint64(bytes)
 }
 
+func (a *AppMetrics) IncrementEvent(name string) {
+	if strings.TrimSpace(name) == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.eventTotals[name]++
+}
+
 func (a *AppMetrics) Text() string {
 	var builder strings.Builder
 	builder.WriteString("# HELP backend_active_requests Active in-flight HTTP requests.\n")
@@ -92,6 +103,8 @@ func (a *AppMetrics) Text() string {
 	builder.WriteString("# TYPE backend_http_request_duration_seconds_sum counter\n")
 	builder.WriteString("# HELP backend_http_response_size_bytes_total Total response bytes written.\n")
 	builder.WriteString("# TYPE backend_http_response_size_bytes_total counter\n")
+	builder.WriteString("# HELP backend_domain_events_total Domain and runtime event counters.\n")
+	builder.WriteString("# TYPE backend_domain_events_total counter\n")
 
 	a.mu.RLock()
 	keys := make([]metricKey, 0, len(a.stats))
@@ -126,6 +139,19 @@ func (a *AppMetrics) Text() string {
 		builder.WriteString(labels)
 		builder.WriteString("} ")
 		builder.WriteString(strconv.FormatUint(value.Bytes, 10))
+		builder.WriteByte('\n')
+	}
+
+	eventKeys := make([]string, 0, len(a.eventTotals))
+	for key := range a.eventTotals {
+		eventKeys = append(eventKeys, key)
+	}
+	sort.Strings(eventKeys)
+	for _, key := range eventKeys {
+		builder.WriteString("backend_domain_events_total{event=")
+		builder.WriteString(strconv.Quote(key))
+		builder.WriteString("} ")
+		builder.WriteString(strconv.FormatUint(a.eventTotals[key], 10))
 		builder.WriteByte('\n')
 	}
 	a.mu.RUnlock()
@@ -188,6 +214,7 @@ func (a *App) handleReadiness(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := a.ready(ctx); err != nil {
+		a.metrics.IncrementEvent("readiness_failed")
 		httpx.WriteError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}

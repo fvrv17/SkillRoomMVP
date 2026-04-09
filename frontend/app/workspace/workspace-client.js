@@ -36,6 +36,9 @@ const HR_NAV_ITEMS = [
   { id: "leaderboard", label: "Leaderboard" },
 ];
 
+const HR_CANDIDATE_PAGE_LIMIT = 6;
+const HR_LEADERBOARD_PAGE_LIMIT = 8;
+
 export default function WorkspaceClient() {
   const router = useRouter();
   const telemetryRef = useRef({ startedAtMs: 0, inputCount: 0, firstInputSent: false });
@@ -55,6 +58,8 @@ export default function WorkspaceClient() {
     templates: [],
     candidates: [],
     leaderboard: [],
+    candidatePagination: { limit: HR_CANDIDATE_PAGE_LIMIT, offset: 0, total: 0, has_more: false },
+    leaderboardPagination: { limit: HR_LEADERBOARD_PAGE_LIMIT, offset: 0, total: 0, has_more: false },
     monetization: null,
     cosmetics: { catalog: [], owned: [], equipped: [] },
     roomCustomization: { equipped: [] },
@@ -120,6 +125,8 @@ export default function WorkspaceClient() {
   const rankings = data.rankings || [];
   const candidates = data.candidates || [];
   const leaderboard = data.leaderboard || [];
+  const candidatePagination = data.candidatePagination || { limit: HR_CANDIDATE_PAGE_LIMIT, offset: 0, total: 0, has_more: false };
+  const leaderboardPagination = data.leaderboardPagination || { limit: HR_LEADERBOARD_PAGE_LIMIT, offset: 0, total: 0, has_more: false };
   const monetization = data.monetization || null;
   const cosmeticInventory = data.cosmetics || { catalog: [], owned: [], equipped: [] };
   const roomCustomization = useMemo(
@@ -239,9 +246,11 @@ export default function WorkspaceClient() {
 
       const me = await apiFetch("/v1/me");
       if (me.role === "hr") {
+        const candidatePage = defaultPagination(HR_CANDIDATE_PAGE_LIMIT);
+        const leaderboardPage = defaultPagination(HR_LEADERBOARD_PAGE_LIMIT);
         const [candidatePayload, leaderboardPayload] = await Promise.all([
-          fetchCandidates(filters),
-          fetchHRLeaderboard(),
+          fetchCandidates(filters, candidatePage),
+          fetchHRLeaderboard(leaderboardPage),
         ]);
         setData({
           user: me,
@@ -252,6 +261,8 @@ export default function WorkspaceClient() {
           templates: [],
           candidates: candidatePayload.candidates || [],
           leaderboard: leaderboardPayload.rankings || [],
+          candidatePagination: candidatePayload.pagination || candidatePage,
+          leaderboardPagination: leaderboardPayload.pagination || leaderboardPage,
           monetization: candidatePayload.monetization || leaderboardPayload.monetization || null,
           cosmetics: { catalog: [], owned: [], equipped: [] },
           roomCustomization: { equipped: [] },
@@ -276,6 +287,8 @@ export default function WorkspaceClient() {
           templates: templatesPayload.templates || [],
           candidates: [],
           leaderboard: [],
+          candidatePagination: defaultPagination(HR_CANDIDATE_PAGE_LIMIT),
+          leaderboardPagination: defaultPagination(HR_LEADERBOARD_PAGE_LIMIT),
           monetization: monetizationPayload || null,
           cosmetics: cosmeticsPayload || { catalog: [], owned: [], equipped: [] },
         });
@@ -297,14 +310,18 @@ export default function WorkspaceClient() {
     const rankingPayload = await apiFetch("/v1/rankings/global");
     let nextCandidates = data.candidates;
     let nextLeaderboard = data.leaderboard;
+    let nextCandidatePagination = data.candidatePagination;
+    let nextLeaderboardPagination = data.leaderboardPagination;
     let nextMonetization = data.monetization;
     if (user.role === "hr") {
       const [candidatePayload, leaderboardPayload] = await Promise.all([
-        fetchCandidates(filters),
-        fetchHRLeaderboard(),
+        fetchCandidates(filters, candidatePagination),
+        fetchHRLeaderboard(leaderboardPagination),
       ]);
       nextCandidates = candidatePayload.candidates || [];
       nextLeaderboard = leaderboardPayload.rankings || [];
+      nextCandidatePagination = candidatePayload.pagination || data.candidatePagination;
+      nextLeaderboardPagination = leaderboardPayload.pagination || data.leaderboardPagination;
       nextMonetization = candidatePayload.monetization || leaderboardPayload.monetization || null;
     }
     setData((current) => ({
@@ -316,6 +333,8 @@ export default function WorkspaceClient() {
       rankings: rankingPayload.rankings || [],
       candidates: nextCandidates,
       leaderboard: nextLeaderboard,
+      candidatePagination: nextCandidatePagination || current.candidatePagination,
+      leaderboardPagination: nextLeaderboardPagination || current.leaderboardPagination,
       monetization: nextMonetization,
     }));
   }
@@ -328,10 +347,12 @@ export default function WorkspaceClient() {
     setBusyAction("filters");
     setError("");
     try {
-      const candidatePayload = await fetchCandidates(filters);
+      const nextPagination = defaultPagination(candidatePagination.limit || HR_CANDIDATE_PAGE_LIMIT);
+      const candidatePayload = await fetchCandidates(filters, nextPagination);
       setData((current) => ({
         ...current,
         candidates: candidatePayload.candidates || [],
+        candidatePagination: candidatePayload.pagination || nextPagination,
         monetization: candidatePayload.monetization || current.monetization,
       }));
       setSelectedCandidate(null);
@@ -375,13 +396,15 @@ export default function WorkspaceClient() {
       const payload = await unlockCandidate(userID);
       setSelectedCandidate(payload);
       const [candidatePayload, leaderboardPayload] = await Promise.all([
-        fetchCandidates(filters),
-        fetchHRLeaderboard(),
+        fetchCandidates(filters, candidatePagination),
+        fetchHRLeaderboard(leaderboardPagination),
       ]);
       setData((current) => ({
         ...current,
         candidates: candidatePayload.candidates || current.candidates,
         leaderboard: leaderboardPayload.rankings || current.leaderboard,
+        candidatePagination: candidatePayload.pagination || current.candidatePagination,
+        leaderboardPagination: leaderboardPayload.pagination || current.leaderboardPagination,
         monetization: payload.monetization || candidatePayload.monetization || leaderboardPayload.monetization || current.monetization,
       }));
     } catch (unlockError) {
@@ -401,17 +424,71 @@ export default function WorkspaceClient() {
       const payload = await inviteCandidate(userID);
       setSelectedCandidate(payload);
       const [candidatePayload, leaderboardPayload] = await Promise.all([
-        fetchCandidates(filters),
-        fetchHRLeaderboard(),
+        fetchCandidates(filters, candidatePagination),
+        fetchHRLeaderboard(leaderboardPagination),
       ]);
       setData((current) => ({
         ...current,
         candidates: candidatePayload.candidates || current.candidates,
         leaderboard: leaderboardPayload.rankings || current.leaderboard,
+        candidatePagination: candidatePayload.pagination || current.candidatePagination,
+        leaderboardPagination: leaderboardPayload.pagination || current.leaderboardPagination,
         monetization: payload.monetization || candidatePayload.monetization || leaderboardPayload.monetization || current.monetization,
       }));
     } catch (inviteError) {
       setError(inviteError instanceof Error ? inviteError.message : "Unable to invite candidate");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleCandidatePage(nextOffset) {
+    if (user.role !== "hr") {
+      return;
+    }
+    const nextPagination = {
+      limit: candidatePagination.limit || HR_CANDIDATE_PAGE_LIMIT,
+      offset: Math.max(nextOffset, 0),
+    };
+    setBusyAction("candidate-page");
+    setError("");
+    try {
+      const candidatePayload = await fetchCandidates(filters, nextPagination);
+      setData((current) => ({
+        ...current,
+        candidates: candidatePayload.candidates || [],
+        candidatePagination: candidatePayload.pagination || current.candidatePagination,
+        monetization: candidatePayload.monetization || current.monetization,
+      }));
+      setSelectedCandidate(null);
+    } catch (candidateError) {
+      setError(candidateError instanceof Error ? candidateError.message : "Unable to load candidates");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleLeaderboardPage(nextOffset) {
+    if (user.role !== "hr") {
+      return;
+    }
+    const nextPagination = {
+      limit: leaderboardPagination.limit || HR_LEADERBOARD_PAGE_LIMIT,
+      offset: Math.max(nextOffset, 0),
+    };
+    setBusyAction("leaderboard-page");
+    setError("");
+    try {
+      const leaderboardPayload = await fetchHRLeaderboard(nextPagination);
+      setData((current) => ({
+        ...current,
+        leaderboard: leaderboardPayload.rankings || [],
+        leaderboardPagination: leaderboardPayload.pagination || current.leaderboardPagination,
+        monetization: leaderboardPayload.monetization || current.monetization,
+      }));
+      setSelectedCandidate(null);
+    } catch (leaderboardError) {
+      setError(leaderboardError instanceof Error ? leaderboardError.message : "Unable to load leaderboard");
     } finally {
       setBusyAction("");
     }
@@ -1156,7 +1233,7 @@ export default function WorkspaceClient() {
               </div>
               {leaderboard.map((candidate, index) => (
                 <div key={`${candidate.user_id}-${index}`} className="ranking-row" data-testid={`leaderboard-row-${candidate.user_id}`}>
-                  <span>#{index + 1}</span>
+                  <span>#{leaderboardPagination.offset + index + 1}</span>
                   <span>{candidate.username}</span>
                   <span>{formatNumber(candidate.summary?.score ?? candidate.current_skill_score)}</span>
                   <span>{formatNumber(candidate.summary?.confidence_score ?? candidate.confidence_score)}</span>
@@ -1183,6 +1260,13 @@ export default function WorkspaceClient() {
                 </div>
               ))}
             </div>
+            <PaginationControls
+              pagination={leaderboardPagination}
+              busy={busyAction === "leaderboard-page"}
+              onPrevious={() => handleLeaderboardPage(leaderboardPagination.offset - leaderboardPagination.limit)}
+              onNext={() => handleLeaderboardPage(leaderboardPagination.offset + leaderboardPagination.limit)}
+              testIdPrefix="leaderboard-pagination"
+            />
           </div>
         </section>
       ) : null}
@@ -1387,6 +1471,13 @@ export default function WorkspaceClient() {
                   </div>
                 );
               })}
+              <PaginationControls
+                pagination={candidatePagination}
+                busy={busyAction === "candidate-page"}
+                onPrevious={() => handleCandidatePage(candidatePagination.offset - candidatePagination.limit)}
+                onNext={() => handleCandidatePage(candidatePagination.offset + candidatePagination.limit)}
+                testIdPrefix="candidate-pagination"
+              />
             </>
           ) : (
             <div className="card empty-panel">
@@ -1488,7 +1579,7 @@ function editableSourceFiles(challenge) {
   return files;
 }
 
-async function fetchCandidates(filters) {
+async function fetchCandidates(filters, pagination = defaultPagination(HR_CANDIDATE_PAGE_LIMIT)) {
   const query = new URLSearchParams();
   if (filters.minScore) {
     query.set("min_score", filters.minScore);
@@ -1499,11 +1590,16 @@ async function fetchCandidates(filters) {
   if (filters.activeDays) {
     query.set("active_days", filters.activeDays);
   }
+  query.set("limit", String(pagination.limit || HR_CANDIDATE_PAGE_LIMIT));
+  query.set("offset", String(pagination.offset || 0));
   return apiFetch(`/v1/hr/candidates?${query.toString()}`);
 }
 
-async function fetchHRLeaderboard() {
-  return apiFetch("/v1/hr/leaderboard");
+async function fetchHRLeaderboard(pagination = defaultPagination(HR_LEADERBOARD_PAGE_LIMIT)) {
+  const query = new URLSearchParams();
+  query.set("limit", String(pagination.limit || HR_LEADERBOARD_PAGE_LIMIT));
+  query.set("offset", String(pagination.offset || 0));
+  return apiFetch(`/v1/hr/leaderboard?${query.toString()}`);
 }
 
 async function fetchCandidateDetail(userID) {
@@ -1603,6 +1699,51 @@ function inviteActionLabel(access) {
     return "Invite limit reached";
   }
   return `Invite candidate (${access.remaining_invites || 0} left)`;
+}
+
+function defaultPagination(limit) {
+  return {
+    limit,
+    offset: 0,
+    total: 0,
+    has_more: false,
+  };
+}
+
+function PaginationControls({ pagination, busy, onPrevious, onNext, testIdPrefix }) {
+  const total = pagination?.total || 0;
+  const limit = pagination?.limit || 0;
+  const offset = pagination?.offset || 0;
+  if (total <= limit && offset === 0) {
+    return null;
+  }
+  const start = total === 0 ? 0 : offset + 1;
+  const end = total === 0 ? 0 : Math.min(offset + limit, total);
+  return (
+    <div className="pagination-row">
+      <p>{`Showing ${start}-${end} of ${total}`}</p>
+      <div className="pagination-row__actions">
+        <button
+          type="button"
+          className="secondary-button"
+          data-testid={`${testIdPrefix}-prev`}
+          onClick={onPrevious}
+          disabled={busy || offset <= 0}
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          className="secondary-button"
+          data-testid={`${testIdPrefix}-next`}
+          onClick={onNext}
+          disabled={busy || !pagination?.has_more}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function fileName(value) {

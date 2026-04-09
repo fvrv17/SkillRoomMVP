@@ -380,6 +380,13 @@ type CandidateView struct {
 	Weaknesses        []string         `json:"weaknesses,omitempty"`
 }
 
+type PaginationInfo struct {
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	Total   int  `json:"total"`
+	HasMore bool `json:"has_more"`
+}
+
 type CandidateContact struct {
 	Email       string `json:"email"`
 	LinkedInURL string `json:"linkedin_url,omitempty"`

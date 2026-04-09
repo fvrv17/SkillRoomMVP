@@ -25,25 +25,24 @@ const resizeNewBlock = `  useEffect(() => {
 async function run() {
   const browser = await chromium.launch({ headless: true });
   try {
-    await candidateFlow(browser);
+    const unique = Date.now();
+    const seededCandidates = await Promise.all(
+      [0, 1, 2, 3, 4, 5, 6, 7, 8].map((index) => registerCandidateByAPI(unique, index)),
+    );
+    await candidateFlow(browser, seededCandidates[0]);
     await refreshFailureFlow(browser);
-    await recruiterFlow(browser);
+    await recruiterFlow(browser, unique + 1000, seededCandidates);
+    await workspaceDegradedFlow(browser, seededCandidates[1]);
+    await runnerDegradedFlow(browser, seededCandidates[2]);
     console.log("browser smoke passed");
   } finally {
     await browser.close();
   }
 }
 
-async function candidateFlow(browser) {
+async function candidateFlow(browser, candidate) {
   const page = await browser.newPage({ baseURL });
-  const unique = Date.now();
-  const authForm = page.locator("form.auth-form");
-
-  await page.goto("/");
-  await page.getByLabel("Username").fill(`candidate-core-${unique}`);
-  await page.getByLabel("Email").fill(`candidate-core-${unique}@skillroom.dev`);
-  await page.getByLabel("Password").fill("password123");
-  await authForm.getByRole("button", { name: "Create account" }).click();
+  await signInCandidateViaUI(page, candidate.email);
 
   await page.waitForURL("**/workspace");
   await waitForWorkspaceReady(page, page.getByTestId("skill-score"));
@@ -74,12 +73,7 @@ async function candidateFlow(browser) {
   await page.close();
 }
 
-async function recruiterFlow(browser) {
-  const unique = Date.now() + 1000;
-  const seededCandidates = await Promise.all(
-    [0, 1, 2, 3].map((index) => registerCandidateByAPI(unique, index)),
-  );
-
+async function recruiterFlow(browser, unique, seededCandidates) {
   const page = await browser.newPage({ baseURL });
   const authForm = page.locator("form.auth-form");
   await page.goto("/");
@@ -153,6 +147,56 @@ async function refreshFailureFlow(browser) {
   await page.close();
 }
 
+async function workspaceDegradedFlow(browser, candidate) {
+  const page = await browser.newPage({ baseURL });
+  await signInCandidateViaUI(page, candidate.email);
+  await page.waitForURL("**/workspace");
+  await waitForWorkspaceReady(page, page.getByTestId("skill-score"));
+
+  await page.route("**/backend/v1/me", async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "workspace bootstrap unavailable" }),
+    });
+  });
+
+  await page.goto("/workspace");
+  await page.getByText(/workspace bootstrap unavailable/i).waitFor({ state: "visible", timeout: 30_000 });
+  await page.close();
+}
+
+async function runnerDegradedFlow(browser, candidate) {
+  const page = await browser.newPage({ baseURL });
+  await signInCandidateViaUI(page, candidate.email);
+  await page.waitForURL("**/workspace");
+  await waitForWorkspaceReady(page, page.getByTestId("skill-score"));
+  await page.getByTestId("nav-challenges").click({ force: true });
+  await page.getByText("Task bank", { exact: true }).first().waitFor({ state: "visible", timeout: 30_000 });
+  await waitForWorkspaceIdle(page);
+  await page.locator('[data-testid^="template-"]').first().waitFor({ state: "visible", timeout: 30_000 });
+  await page.getByTestId("template-react_debug_resize_cleanup").click();
+
+  const editor = page.getByTestId("challenge-editor");
+  await editor.waitFor({ state: "visible", timeout: 30_000 });
+  const starter = await editor.inputValue();
+  const patched = starter.replace(resizeOldBlock, resizeNewBlock);
+  assert.notEqual(patched, starter, "expected to patch resize challenge starter code");
+  await editor.fill(patched);
+
+  await page.route("**/backend/v1/challenges/instances/**/runs", async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "runner unavailable: smoke" }),
+    });
+  });
+
+  await page.getByTestId("run-checks").click();
+  await page.getByText(/runner unavailable/i).waitFor({ state: "visible", timeout: 30_000 });
+  await page.close();
+}
+
 async function registerCandidateByAPI(unique, index) {
   const candidateEmail = `candidate-hr-${unique}-${index}@skillroom.dev`;
   const candidateUsername = `candidate-hr-${unique}-${index}`;
@@ -170,6 +214,24 @@ async function registerCandidateByAPI(unique, index) {
   assert.equal(registerResponse.status, 201, "expected candidate registration for recruiter smoke");
   const candidatePayload = await registerResponse.json();
   return { email: candidateEmail, username: candidateUsername, userID: candidatePayload.user.id };
+}
+
+async function registerCandidateViaUI(page, username, email) {
+  const authForm = page.locator("form.auth-form");
+  await page.goto("/");
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("password123");
+  await authForm.getByRole("button", { name: "Create account" }).click();
+}
+
+async function signInCandidateViaUI(page, email) {
+  const authForm = page.locator("form.auth-form");
+  await page.goto("/");
+  await page.getByRole("button", { name: "Sign in" }).first().click();
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("password123");
+  await authForm.getByRole("button", { name: "Sign in" }).click();
 }
 
 async function openLeaderboardCandidate(page, candidate) {

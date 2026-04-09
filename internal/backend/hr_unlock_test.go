@@ -43,6 +43,7 @@ func TestHRCandidatePreviewAndUnlockFlow(t *testing.T) {
 	}
 	var searchPayload struct {
 		Candidates   []CandidateView     `json:"candidates"`
+		Pagination   PaginationInfo      `json:"pagination"`
 		Monetization MonetizationSummary `json:"monetization"`
 	}
 	if err := json.NewDecoder(searchResp.Body).Decode(&searchPayload); err != nil {
@@ -50,6 +51,9 @@ func TestHRCandidatePreviewAndUnlockFlow(t *testing.T) {
 	}
 	if len(searchPayload.Candidates) == 0 {
 		t.Fatal("expected at least one candidate in HR search")
+	}
+	if searchPayload.Pagination.Total == 0 {
+		t.Fatal("expected pagination metadata in HR search payload")
 	}
 	candidatePreview := searchPayload.Candidates[0]
 	if candidatePreview.Access.IsUnlocked {
@@ -221,6 +225,7 @@ func TestHRInviteRequiresUnlockAndHonorsPlanLimit(t *testing.T) {
 	}
 	var leaderboardPayload struct {
 		Rankings     []CandidateView     `json:"rankings"`
+		Pagination   PaginationInfo      `json:"pagination"`
 		Monetization MonetizationSummary `json:"monetization"`
 	}
 	if err := json.NewDecoder(leaderboardResp.Body).Decode(&leaderboardPayload); err != nil {
@@ -228,5 +233,91 @@ func TestHRInviteRequiresUnlockAndHonorsPlanLimit(t *testing.T) {
 	}
 	if leaderboardPayload.Monetization.Usage.CandidateInvitesUsed != 2 {
 		t.Fatalf("expected 2 invites used, got %d", leaderboardPayload.Monetization.Usage.CandidateInvitesUsed)
+	}
+	if leaderboardPayload.Pagination.Total != len(leaderboardPayload.Rankings) {
+		t.Fatalf("expected leaderboard pagination total to match visible rankings in this fixture, total=%d visible=%d", leaderboardPayload.Pagination.Total, len(leaderboardPayload.Rankings))
+	}
+}
+
+func TestHRCandidateEndpointsSupportPagination(t *testing.T) {
+	app := newTestApp()
+	router := app.Router()
+
+	hrAuth := registerAndCaptureAuth(t, router, RegisterRequest{
+		Email:    "hr-pagination@example.com",
+		Username: "hr-pagination",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleHR,
+	})
+
+	for i := 0; i < 4; i++ {
+		auth := registerAndCaptureAuth(t, router, RegisterRequest{
+			Email:    "candidate-pagination-" + string(rune('a'+i)) + "@example.com",
+			Username: "candidate-pagination-" + string(rune('a'+i)),
+			Password: "password123",
+			Country:  "US",
+			Role:     RoleUser,
+		})
+		submitSolvedChallenge(t, router, auth.AccessToken, "react_feature_search", searchSolutionCode(), []TelemetryEventRequest{
+			{EventType: "input", OffsetSeconds: 10 + i},
+		})
+	}
+
+	firstPageResp := performJSON(t, router, http.MethodGet, "/v1/hr/candidates?limit=2&offset=0", nil, hrAuth.AccessToken)
+	if firstPageResp.Code != http.StatusOK {
+		t.Fatalf("first candidate page status: %d", firstPageResp.Code)
+	}
+	var firstPage struct {
+		Candidates []CandidateView `json:"candidates"`
+		Pagination PaginationInfo  `json:"pagination"`
+	}
+	if err := json.NewDecoder(firstPageResp.Body).Decode(&firstPage); err != nil {
+		t.Fatalf("decode first candidate page: %v", err)
+	}
+	if len(firstPage.Candidates) != 2 {
+		t.Fatalf("expected 2 candidate previews on first page, got %d", len(firstPage.Candidates))
+	}
+	if firstPage.Pagination.Total != 4 || !firstPage.Pagination.HasMore {
+		t.Fatalf("unexpected first candidate pagination: %+v", firstPage.Pagination)
+	}
+
+	secondPageResp := performJSON(t, router, http.MethodGet, "/v1/hr/candidates?limit=2&offset=2", nil, hrAuth.AccessToken)
+	if secondPageResp.Code != http.StatusOK {
+		t.Fatalf("second candidate page status: %d", secondPageResp.Code)
+	}
+	var secondPage struct {
+		Candidates []CandidateView `json:"candidates"`
+		Pagination PaginationInfo  `json:"pagination"`
+	}
+	if err := json.NewDecoder(secondPageResp.Body).Decode(&secondPage); err != nil {
+		t.Fatalf("decode second candidate page: %v", err)
+	}
+	if len(secondPage.Candidates) != 2 {
+		t.Fatalf("expected 2 candidate previews on second page, got %d", len(secondPage.Candidates))
+	}
+	if secondPage.Pagination.Total != 4 || secondPage.Pagination.HasMore {
+		t.Fatalf("unexpected second candidate pagination: %+v", secondPage.Pagination)
+	}
+	if firstPage.Candidates[0].UserID == secondPage.Candidates[0].UserID {
+		t.Fatal("expected candidate pagination pages to advance through the result set")
+	}
+
+	leaderboardResp := performJSON(t, router, http.MethodGet, "/v1/hr/leaderboard?limit=2&offset=2", nil, hrAuth.AccessToken)
+	if leaderboardResp.Code != http.StatusOK {
+		t.Fatalf("leaderboard pagination status: %d", leaderboardResp.Code)
+	}
+	var leaderboardPage struct {
+		Rankings   []CandidateView `json:"rankings"`
+		Pagination PaginationInfo  `json:"pagination"`
+	}
+	if err := json.NewDecoder(leaderboardResp.Body).Decode(&leaderboardPage); err != nil {
+		t.Fatalf("decode paginated leaderboard: %v", err)
+	}
+	if len(leaderboardPage.Rankings) != 2 {
+		t.Fatalf("expected 2 leaderboard entries on paginated page, got %d", len(leaderboardPage.Rankings))
+	}
+	if leaderboardPage.Pagination.Total != 4 || leaderboardPage.Pagination.HasMore {
+		t.Fatalf("unexpected leaderboard pagination: %+v", leaderboardPage.Pagination)
 	}
 }

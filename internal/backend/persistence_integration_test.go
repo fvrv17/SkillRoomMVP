@@ -237,12 +237,13 @@ func TestPersistentAppUsesSQLBackedRankingsAndCandidateSearch(t *testing.T) {
 		t.Fatalf("expected solved user to lead rankings, got %s", globalRankings["rankings"][0].Username)
 	}
 
-	searchResp := performJSON(t, router, http.MethodGet, "/v1/hr/candidates?min_score=1", nil, hrAuth.AccessToken)
+	searchResp := performJSON(t, router, http.MethodGet, "/v1/hr/candidates?min_score=1&limit=1&offset=0", nil, hrAuth.AccessToken)
 	if searchResp.Code != http.StatusOK {
 		t.Fatalf("hr search status: %d", searchResp.Code)
 	}
 	var searchPayload struct {
 		Candidates []CandidateView `json:"candidates"`
+		Pagination PaginationInfo  `json:"pagination"`
 	}
 	if err := json.NewDecoder(searchResp.Body).Decode(&searchPayload); err != nil {
 		t.Fatalf("decode hr candidates: %v", err)
@@ -253,25 +254,29 @@ func TestPersistentAppUsesSQLBackedRankingsAndCandidateSearch(t *testing.T) {
 	if searchPayload.Candidates[0].Username != "sql-rank-top" {
 		t.Fatalf("expected top candidate in filtered search, got %s", searchPayload.Candidates[0].Username)
 	}
+	if searchPayload.Pagination.Total != 1 || searchPayload.Pagination.HasMore {
+		t.Fatalf("expected filtered search pagination metadata to reflect a single hit, got %+v", searchPayload.Pagination)
+	}
 
-	leaderboardResp := performJSON(t, router, http.MethodGet, "/v1/hr/leaderboard", nil, hrAuth.AccessToken)
+	leaderboardResp := performJSON(t, router, http.MethodGet, "/v1/hr/leaderboard?limit=1&offset=1", nil, hrAuth.AccessToken)
 	if leaderboardResp.Code != http.StatusOK {
 		t.Fatalf("hr leaderboard status: %d", leaderboardResp.Code)
 	}
 	var leaderboardPayload struct {
-		Rankings []CandidateView `json:"rankings"`
+		Rankings   []CandidateView `json:"rankings"`
+		Pagination PaginationInfo  `json:"pagination"`
 	}
 	if err := json.NewDecoder(leaderboardResp.Body).Decode(&leaderboardPayload); err != nil {
 		t.Fatalf("decode hr leaderboard: %v", err)
 	}
-	if len(leaderboardPayload.Rankings) < 2 {
-		t.Fatalf("expected at least 2 HR leaderboard entries, got %d", len(leaderboardPayload.Rankings))
+	if len(leaderboardPayload.Rankings) != 1 {
+		t.Fatalf("expected a single paginated leaderboard entry, got %d", len(leaderboardPayload.Rankings))
 	}
-	if leaderboardPayload.Rankings[0].UserID != searchPayload.Candidates[0].UserID {
-		t.Fatalf("expected leaderboard and search to agree on top candidate")
+	if leaderboardPayload.Pagination.Total != 2 || leaderboardPayload.Pagination.HasMore {
+		t.Fatalf("expected leaderboard pagination to report two total candidates and no third page, got %+v", leaderboardPayload.Pagination)
 	}
-	if leaderboardPayload.Rankings[1].UserID != otherCandidate.User.ID {
-		t.Fatalf("expected second candidate to remain in leaderboard ordering")
+	if leaderboardPayload.Rankings[0].UserID != otherCandidate.User.ID {
+		t.Fatalf("expected second candidate to remain available on the second leaderboard page")
 	}
 }
 

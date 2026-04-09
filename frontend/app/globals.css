@@ -1759,6 +1759,28 @@ button {
   flex-wrap: wrap;
 }
 
+.pagination-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 18px;
+  margin-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.pagination-row p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.95rem;
+}
+
+.pagination-row__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .candidate-card__header h3 {
   margin: 0;
   font-size: 1.4rem;
