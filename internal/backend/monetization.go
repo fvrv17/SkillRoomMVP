@@ -23,6 +23,7 @@ const (
 var (
 	errCosmeticNotFound  = errors.New("cosmetic not found")
 	errCosmeticForbidden = errors.New("cosmetic is unavailable for the current plan")
+	errHRAIQuotaExceeded = errors.New("hr ai action quota exceeded for current plan")
 )
 
 func (a *App) handleMonetizationSummary(w http.ResponseWriter, r *http.Request) {
@@ -707,6 +708,21 @@ func (a *App) roomCustomizationLocked(userID string) RoomCustomizationState {
 	return RoomCustomizationState{
 		Equipped: a.listEquippedCosmeticsLocked(userID),
 	}
+}
+
+func (a *App) enforceHRAIQuotaLocked(userID string, units int) error {
+	if units <= 0 {
+		units = 1
+	}
+	monetization := a.monetizationSummaryLocked(userID)
+	limit := monetization.Entitlements.HRAIActionsPerMonth
+	if limit <= 0 {
+		return errHRAIQuotaExceeded
+	}
+	if monetization.Usage.HRAIActionsUsed+units > limit {
+		return errHRAIQuotaExceeded
+	}
+	return nil
 }
 
 func (a *App) equipCosmetic(ctx context.Context, userID, cosmeticCode string) (CosmeticInventoryResponse, error) {

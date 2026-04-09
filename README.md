@@ -4,6 +4,7 @@ SkillRoom is a production-oriented MVP for evaluating React skills through real 
 
 - a Go modular monolith for product logic and APIs
 - a separate runner service for isolated challenge execution
+- a restricted Docker API proxy between the runner and the host socket
 - PostgreSQL for system-of-record data
 - Redis for cache, rate limiting, and hot operational state
 - Next.js for the browser client
@@ -55,6 +56,7 @@ docker compose -f deploy/docker-compose.yml up --build
 
 Open `http://localhost:3000` for the Next.js frontend.
 The backend root route only redirects to the frontend when `FRONTEND_REDIRECT_URL` is set.
+The runner no longer mounts the host Docker socket directly; sandbox execution is brokered through an internal Docker API proxy.
 
 For a backend-only local boot without PostgreSQL or Redis, set `ALLOW_INSECURE_BOOT=true`. The default startup path now expects the full production-oriented stack.
 

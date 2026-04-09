@@ -16,10 +16,15 @@ import (
 type stubEngine struct {
 	result RunResult
 	err    error
+	ready  error
 }
 
 func (s stubEngine) Run(context.Context, RunRequest) (RunResult, error) {
 	return s.result, s.err
+}
+
+func (s stubEngine) Ready(context.Context) error {
+	return s.ready
 }
 
 func TestHandlerServesRunEndpoint(t *testing.T) {
@@ -61,6 +66,17 @@ func TestHandlerRejectsInvalidPayload(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
+func TestHandlerReadinessReflectsEngineHealth(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+
+	NewHandler(stubEngine{ready: io.EOF}).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", recorder.Code)
 	}
 }
 

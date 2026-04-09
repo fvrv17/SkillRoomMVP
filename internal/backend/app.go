@@ -30,6 +30,11 @@ type refreshSession struct {
 	ExpiresAt time.Time
 }
 
+const (
+	accessTokenCookieName  = "skillroom_access"
+	refreshTokenCookieName = "skillroom_refresh"
+)
+
 type App struct {
 	mu                sync.RWMutex
 	tokens            *security.TokenManager
@@ -89,7 +94,7 @@ type LoginRequest struct {
 type AuthResponse struct {
 	User         User      `json:"user"`
 	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
@@ -270,10 +275,11 @@ func (a *App) Router() http.Handler {
 	r.Get("/metrics", a.handleMetrics)
 	a.mountFrontend(r)
 
-	r.Route("/v1", func(r chi.Router) {
-		r.With(a.rateLimitByIP("auth-register", 10, time.Minute)).Post("/auth/register", a.handleRegister)
-		r.With(a.rateLimitByIP("auth-login", 30, time.Minute)).Post("/auth/login", a.handleLogin)
-		r.With(a.rateLimitByIP("auth-refresh", 30, time.Minute)).Post("/auth/refresh", a.handleRefresh)
+		r.Route("/v1", func(r chi.Router) {
+			r.With(a.rateLimitByIP("auth-register", 10, time.Minute)).Post("/auth/register", a.handleRegister)
+			r.With(a.rateLimitByIP("auth-login", 30, time.Minute)).Post("/auth/login", a.handleLogin)
+			r.With(a.rateLimitByIP("auth-refresh", 30, time.Minute)).Post("/auth/refresh", a.handleRefresh)
+			r.With(a.rateLimitByIP("auth-logout", 60, time.Minute)).Post("/auth/logout", a.handleLogout)
 
 		r.Group(func(r chi.Router) {
 			r.Use(a.requireAuth)
@@ -340,6 +346,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.writeAuthCookies(w, r, resp)
 	httpx.WriteJSON(w, http.StatusCreated, resp)
 }
 
@@ -354,21 +361,39 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
+	a.writeAuthCookies(w, r, resp)
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (a *App) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req RefreshRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp, err := a.refresh(r.Context(), req.RefreshToken)
+	resp, err := a.refresh(r.Context(), a.refreshTokenFromRequest(r, req.RefreshToken))
 	if err != nil {
+		a.clearAuthCookies(w, r)
 		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
+	a.writeAuthCookies(w, r, resp)
 	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
+	var req RefreshRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := a.logout(r.Context(), a.refreshTokenFromRequest(r, req.RefreshToken)); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.clearAuthCookies(w, r)
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "signed_out"})
 }
 
 func (a *App) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -682,6 +707,10 @@ func (a *App) handleAIMutationPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	response, err := a.aiMutationPreview(r.Context(), user.ID, chi.URLParam(r, "templateID"), req)
 	if err != nil {
+		if errors.Is(err, errHRAIQuotaExceeded) {
+			httpx.WriteError(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -909,6 +938,17 @@ func (a *App) refresh(ctx context.Context, token string) (AuthResponse, error) {
 	return a.mintAuthLocked(ctx, user)
 }
 
+func (a *App) logout(ctx context.Context, token string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil
+	}
+	delete(a.refreshSessions, token)
+	return a.deleteRefreshSessionLocked(ctx, token)
+}
+
 func (a *App) mintAuthLocked(ctx context.Context, user User) (AuthResponse, error) {
 	accessToken, claims, err := a.tokens.MintAccessToken(user.ID, string(user.Role), "", a.accessTTL)
 	if err != nil {
@@ -929,6 +969,71 @@ func (a *App) mintAuthLocked(ctx context.Context, user User) (AuthResponse, erro
 		RefreshToken: refreshToken,
 		ExpiresAt:    time.Unix(claims.ExpiresAt, 0).UTC(),
 	}, nil
+}
+
+func (a *App) refreshTokenFromRequest(r *http.Request, bodyToken string) string {
+	if strings.TrimSpace(bodyToken) != "" {
+		return strings.TrimSpace(bodyToken)
+	}
+	if r != nil {
+		if cookie, err := r.Cookie(refreshTokenCookieName); err == nil {
+			return strings.TrimSpace(cookie.Value)
+		}
+	}
+	return ""
+}
+
+func (a *App) writeAuthCookies(w http.ResponseWriter, r *http.Request, resp AuthResponse) {
+	secure := authCookieSecure(r)
+	w.Header().Set("Cache-Control", "no-store")
+	http.SetCookie(w, &http.Cookie{
+		Name:     accessTokenCookieName,
+		Value:    resp.AccessToken,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		Expires:  resp.ExpiresAt,
+		MaxAge:   maxInt(int(time.Until(resp.ExpiresAt).Seconds()), 0),
+	})
+	if strings.TrimSpace(resp.RefreshToken) != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     refreshTokenCookieName,
+			Value:    resp.RefreshToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			Secure:   secure,
+			Expires:  time.Now().UTC().Add(a.refreshTTL),
+			MaxAge:   maxInt(int(a.refreshTTL.Seconds()), 0),
+		})
+	}
+}
+
+func (a *App) clearAuthCookies(w http.ResponseWriter, r *http.Request) {
+	secure := authCookieSecure(r)
+	for _, cookieName := range []string{accessTokenCookieName, refreshTokenCookieName} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     cookieName,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   secure,
+			Expires:  time.Unix(0, 0).UTC(),
+			MaxAge:   -1,
+		})
+	}
+}
+
+func authCookieSecure(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }
 
 func (a *App) authenticatedUser(r *http.Request) (User, error) {
@@ -978,7 +1083,7 @@ func (a *App) requireRoles(roles ...Role) func(http.Handler) http.Handler {
 
 func (a *App) rateLimitByIP(scope string, limit int, window time.Duration) func(http.Handler) http.Handler {
 	return a.rateLimitMiddleware(scope, limit, window, func(r *http.Request) (string, error) {
-		if ip := strings.TrimSpace(r.RemoteAddr); ip != "" {
+		if ip := strings.TrimSpace(realIP(r)); ip != "" {
 			return ip, nil
 		}
 		return "unknown", nil
@@ -1342,6 +1447,10 @@ func (a *App) aiMutationPreview(ctx context.Context, userID, templateID string, 
 	if !ok {
 		a.mu.RUnlock()
 		return AIMutationPreviewResponse{}, errors.New("template not found")
+	}
+	if err := a.enforceHRAIQuotaLocked(userID, 1); err != nil {
+		a.mu.RUnlock()
+		return AIMutationPreviewResponse{}, err
 	}
 	provider := a.ai
 	a.mu.RUnlock()

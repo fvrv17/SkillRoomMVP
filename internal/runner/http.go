@@ -15,7 +15,20 @@ func NewHandler(engine Engine) http.Handler {
 	mux.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "runner"})
 	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if engine == nil {
+			writeError(w, http.StatusServiceUnavailable, "runner engine is not configured")
+			return
+		}
+		type readinessChecker interface {
+			Ready(context.Context) error
+		}
+		if checker, ok := engine.(readinessChecker); ok {
+			if err := checker.Ready(r.Context()); err != nil {
+				writeError(w, http.StatusServiceUnavailable, err.Error())
+				return
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "service": "runner"})
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {

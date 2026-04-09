@@ -19,13 +19,13 @@ func main() {
 	idleTimeout := config.Duration("RUNNER_IDLE_TIMEOUT", 60*time.Second)
 	shutdownTimeout := config.Duration("RUNNER_SHUTDOWN_TIMEOUT", 10*time.Second)
 	sandboxImage := config.String("RUNNER_SANDBOX_IMAGE", "deploy-runner:latest")
-	dockerBinary := config.String("RUNNER_DOCKER_BINARY", "docker")
+	dockerHost := config.String("RUNNER_DOCKER_HOST", "")
 	cpuLimit := config.String("RUNNER_CPU_LIMIT", "0.50")
 	memoryMB := config.Int("RUNNER_MEMORY_MB", 256)
 	defaultTimeout := config.Duration("RUNNER_DEFAULT_TIMEOUT", 6*time.Second)
 
 	engine := runsvc.NewDockerEngine(runsvc.DockerConfig{
-		DockerBinary:   dockerBinary,
+		DockerHost:     dockerHost,
 		SandboxImage:   sandboxImage,
 		DefaultCPU:     cpuLimit,
 		DefaultMemory:  memoryMB,

@@ -1,8 +1,11 @@
 package backend
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -25,7 +28,7 @@ func TestRealRunnerEndToEnd(t *testing.T) {
 		t.Skip("docker daemon is not available")
 	}
 
-	const sandboxImage = "skillroom-runner-e2e:local"
+	sandboxImage := "skillroom-runner-e2e:" + runnerSandboxFingerprint(t)
 	ensureRunnerSandboxImage(t, dockerBinary, sandboxImage)
 
 	app := NewApp("e2e-secret", "e2e-issuer")
@@ -157,6 +160,27 @@ func ensureRunnerSandboxImage(t *testing.T, dockerBinary, image string) {
 	if err != nil {
 		t.Fatalf("build runner sandbox image: %v\n%s", err, string(output))
 	}
+}
+
+func runnerSandboxFingerprint(t *testing.T) string {
+	t.Helper()
+
+	rootDir := filepath.Clean(filepath.Join("..", ".."))
+	hash := sha256.New()
+	for _, path := range []string{
+		filepath.Join("deploy", "runner.Dockerfile"),
+		filepath.Join("deploy", "runner-runtime", "package.json"),
+		filepath.Join("deploy", "runner-runtime", "run-evaluation.mjs"),
+	} {
+		content, err := os.ReadFile(filepath.Join(rootDir, path))
+		if err != nil {
+			t.Fatalf("read sandbox input %s: %v", path, err)
+		}
+		if _, err := hash.Write(content); err != nil {
+			t.Fatalf("hash sandbox input %s: %v", path, err)
+		}
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))[:12]
 }
 
 func runCommand(name string, args ...string) ([]byte, error) {

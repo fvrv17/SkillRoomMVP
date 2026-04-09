@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 
 FROM node:20-alpine
 
-RUN apk add --no-cache ca-certificates tzdata wget docker-cli
+RUN apk add --no-cache ca-certificates tzdata wget
 
 WORKDIR /opt/skillroom-runtime
 
@@ -20,6 +20,8 @@ RUN npm install --ignore-scripts
 
 COPY deploy/runner-runtime/run-evaluation.mjs ./run-evaluation.mjs
 COPY --from=builder /out/runner-service /usr/local/bin/runner-service
+
+USER node
 
 EXPOSE 8081
 

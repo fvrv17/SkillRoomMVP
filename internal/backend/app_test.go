@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -273,6 +275,119 @@ func TestRunPreviewDoesNotFinalizeChallenge(t *testing.T) {
 	}
 }
 
+func TestAuthSupportsCookieRefreshAndLogout(t *testing.T) {
+	app := newTestApp()
+	router := app.Router()
+
+	registerResp := performJSON(t, router, http.MethodPost, "/v1/auth/register", RegisterRequest{
+		Email:    "cookie@example.com",
+		Username: "cookie-user",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleUser,
+	}, "")
+	if registerResp.Code != http.StatusCreated {
+		t.Fatalf("register failed: %d", registerResp.Code)
+	}
+	accessCookie := findCookie(t, registerResp, accessTokenCookieName)
+	refreshCookie := findCookie(t, registerResp, refreshTokenCookieName)
+	if accessCookie == nil || refreshCookie == nil {
+		t.Fatal("expected auth cookies to be set")
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	meReq.AddCookie(accessCookie)
+	meResp := httptest.NewRecorder()
+	router.ServeHTTP(meResp, meReq)
+	if meResp.Code != http.StatusOK {
+		t.Fatalf("cookie-auth me failed: %d", meResp.Code)
+	}
+
+	refreshReq := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", bytes.NewBufferString("{}"))
+	refreshReq.Header.Set("Content-Type", "application/json")
+	refreshReq.AddCookie(refreshCookie)
+	refreshResp := httptest.NewRecorder()
+	router.ServeHTTP(refreshResp, refreshReq)
+	if refreshResp.Code != http.StatusOK {
+		t.Fatalf("refresh via cookie failed: %d", refreshResp.Code)
+	}
+	nextAccess := findCookie(t, refreshResp, accessTokenCookieName)
+	nextRefresh := findCookie(t, refreshResp, refreshTokenCookieName)
+	if nextAccess == nil || nextRefresh == nil {
+		t.Fatal("expected rotated auth cookies after refresh")
+	}
+
+	logoutReq := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", bytes.NewBufferString("{}"))
+	logoutReq.Header.Set("Content-Type", "application/json")
+	logoutReq.AddCookie(nextRefresh)
+	logoutResp := httptest.NewRecorder()
+	router.ServeHTTP(logoutResp, logoutReq)
+	if logoutResp.Code != http.StatusOK {
+		t.Fatalf("logout failed: %d", logoutResp.Code)
+	}
+	if cookie := findCookie(t, logoutResp, refreshTokenCookieName); cookie == nil || cookie.MaxAge != -1 {
+		t.Fatal("expected refresh cookie to be cleared on logout")
+	}
+}
+
+func TestAuthRateLimitUsesStableClientIP(t *testing.T) {
+	app := newTestApp()
+	router := app.Router()
+
+	for index := 0; index < 10; index++ {
+		reqBody := RegisterRequest{
+			Email:    "ratelimit" + strconv.Itoa(index) + "@example.com",
+			Username: "rate-user-" + strconv.Itoa(index),
+			Password: "password123",
+			Country:  "US",
+			Role:     RoleUser,
+		}
+		resp := performJSONWithRemoteAddr(t, router, http.MethodPost, "/v1/auth/register", reqBody, "", "203.0.113.10:"+strconv.Itoa(40000+index))
+		if resp.Code != http.StatusCreated {
+			t.Fatalf("expected register %d to succeed, got %d", index, resp.Code)
+		}
+	}
+
+	limitedResp := performJSONWithRemoteAddr(t, router, http.MethodPost, "/v1/auth/register", RegisterRequest{
+		Email:    "ratelimit-final@example.com",
+		Username: "rate-user-final",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleUser,
+	}, "", "203.0.113.10:49999")
+	if limitedResp.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected stable IP rate limit to trigger, got %d", limitedResp.Code)
+	}
+}
+
+func TestHRAIMutationPreviewEnforcesPlanQuota(t *testing.T) {
+	app := newTestApp()
+	router := app.Router()
+	auth := registerAndCaptureAuth(t, router, RegisterRequest{
+		Email:    "quota-hr@example.com",
+		Username: "quota-hr",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleHR,
+	})
+
+	for index := 0; index < 10; index++ {
+		resp := performJSON(t, router, http.MethodPost, "/v1/hr/ai/templates/react_feature_search/mutation-preview", AIMutationPreviewRequest{
+			Seed: int64(index + 1),
+		}, auth.AccessToken)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("expected hr mutation preview %d to succeed, got %d", index, resp.Code)
+		}
+	}
+
+	limitedResp := performJSON(t, router, http.MethodPost, "/v1/hr/ai/templates/react_feature_search/mutation-preview", AIMutationPreviewRequest{
+		Seed: 99,
+	}, auth.AccessToken)
+	if limitedResp.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected HR AI quota limit to trigger, got %d", limitedResp.Code)
+	}
+}
+
 func TestRankingsFriendChatAndHRSearch(t *testing.T) {
 	app := newTestApp()
 	router := app.Router()
@@ -466,22 +581,28 @@ func registerAndLogin(t *testing.T, router http.Handler, req RegisterRequest) st
 
 func performJSON(t *testing.T, router http.Handler, method, path string, body any, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	var payload bytes.Buffer
-	if body != nil {
-		if err := json.NewEncoder(&payload).Encode(body); err != nil {
-			t.Fatalf("encode body: %v", err)
+	return performJSONWithRemoteAddr(t, router, method, path, body, token, "192.0.2.1:12345")
+}
+
+func findCookie(t *testing.T, recorder *httptest.ResponseRecorder, name string) *http.Cookie {
+	t.Helper()
+	for _, raw := range recorder.Result().Cookies() {
+		if raw.Name == name {
+			cookieCopy := *raw
+			return &cookieCopy
 		}
 	}
-	req := httptest.NewRequest(method, path, &payload)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	headers := recorder.Header().Values("Set-Cookie")
+	for _, header := range headers {
+		if strings.HasPrefix(header, name+"=") {
+			response := &http.Response{Header: http.Header{"Set-Cookie": []string{header}}}
+			cookies := response.Cookies()
+			if len(cookies) > 0 {
+				return cookies[0]
+			}
+		}
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-	return recorder
+	return nil
 }
 
 func userIDFromToken(t *testing.T, app *App, token string) string {

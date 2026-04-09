@@ -26,6 +26,8 @@ type TokenManager struct {
 	issuer string
 }
 
+const AccessTokenCookieName = "skillroom_access"
+
 func NewTokenManager(secret, issuer string) *TokenManager {
 	return &TokenManager{
 		secret: []byte(secret),
@@ -100,6 +102,9 @@ func (tm *TokenManager) ParseAccessToken(token string) (AccessClaims, error) {
 func (tm *TokenManager) ClaimsFromRequest(r *http.Request) (AccessClaims, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
+		if cookie, err := r.Cookie(AccessTokenCookieName); err == nil {
+			return tm.ParseAccessToken(strings.TrimSpace(cookie.Value))
+		}
 		return AccessClaims{}, errors.New("missing authorization header")
 	}
 

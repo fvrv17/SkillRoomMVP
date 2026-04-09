@@ -27,15 +27,41 @@ services:
     environment:
       RUNNER_ADDR: ":8081"
       RUNNER_SANDBOX_IMAGE: deploy-runner:latest
+      RUNNER_DOCKER_HOST: http://runner-docker-proxy:2375
       RUNNER_CPU_LIMIT: "0.50"
       RUNNER_MEMORY_MB: 256
       RUNNER_DEFAULT_TIMEOUT: 60s
     expose:
       - "8081"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      runner-docker-proxy:
+        condition: service_healthy
+    networks:
+      - default
+      - runner_control
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  runner-docker-proxy:
+    build:
+      context: ..
+      dockerfile: deploy/runner-docker-proxy.Dockerfile
+    environment:
+      RUNNER_DOCKER_PROXY_ADDR: ":2375"
+      RUNNER_DOCKER_SOCKET: /var/run/docker.sock
+    expose:
+      - "2375"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - runner_control
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2375/readyz >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -105,3 +131,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  runner_control:

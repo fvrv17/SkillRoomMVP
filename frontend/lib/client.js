@@ -1,39 +1,45 @@
-const AUTH_KEY = "skillroom.auth";
 const REGION_KEY = "skillroom.region";
 const AUTH_UPDATED_EVENT = "skillroom:auth-updated";
 const AUTH_CLEARED_EVENT = "skillroom:auth-cleared";
 
+let authState = null;
 let refreshPromise = null;
 
 export function loadAuth() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const raw = window.localStorage.getItem(AUTH_KEY);
-  if (!raw) {
-    return null;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  return authState;
 }
 
 export function saveAuth(auth) {
-  if (typeof window === "undefined") {
-    return;
+  if (!auth) {
+    authState = null;
+  } else {
+    const nextAuth = { ...auth };
+    delete nextAuth.refresh_token;
+    authState = nextAuth;
   }
-  window.localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
-  window.dispatchEvent(new CustomEvent(AUTH_UPDATED_EVENT, { detail: auth }));
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(AUTH_UPDATED_EVENT, { detail: authState }));
+  }
 }
 
 export function clearAuth() {
-  if (typeof window === "undefined") {
-    return;
+  authState = null;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTH_CLEARED_EVENT));
   }
-  window.localStorage.removeItem(AUTH_KEY);
-  window.dispatchEvent(new Event(AUTH_CLEARED_EVENT));
+}
+
+export async function signOut() {
+  try {
+    await performRequest("/v1/auth/logout", {
+      method: "POST",
+      allowAuth: false,
+    });
+  } catch {
+    // Best-effort logout. The local auth state still needs to be cleared.
+  } finally {
+    clearAuth();
+  }
 }
 
 export function subscribeAuth(onUpdated, onCleared) {
@@ -56,6 +62,17 @@ export function subscribeAuth(onUpdated, onCleared) {
     window.removeEventListener(AUTH_UPDATED_EVENT, handleUpdated);
     window.removeEventListener(AUTH_CLEARED_EVENT, handleCleared);
   };
+}
+
+export async function restoreAuth() {
+  if (loadAuth()) {
+    return loadAuth();
+  }
+  try {
+    return await refreshStoredAuth();
+  } catch {
+    return null;
+  }
 }
 
 export function loadRegionId() {
@@ -87,10 +104,10 @@ export async function apiFetch(path, options = {}) {
     cache,
   });
 
-  if (response.status === 401 && allowRefresh && shouldRefresh(path, currentAuth)) {
-    const nextAuth = await refreshStoredAuth(currentAuth);
+  if (response.status === 401 && allowRefresh && shouldRefresh(path)) {
+    const nextAuth = await refreshStoredAuth();
     response = await performRequest(path, {
-      token: nextAuth.access_token,
+      token: nextAuth?.access_token || token,
       body,
       headers,
       method,
@@ -101,16 +118,11 @@ export async function apiFetch(path, options = {}) {
   return unwrapResponse(response);
 }
 
-async function refreshStoredAuth(currentAuth) {
-  if (!currentAuth?.refresh_token) {
-    clearAuth();
-    throw createAPIError("session expired", 401);
-  }
+async function refreshStoredAuth() {
   if (!refreshPromise) {
     refreshPromise = (async () => {
       const response = await performRequest("/v1/auth/refresh", {
         method: "POST",
-        body: { refresh_token: currentAuth.refresh_token },
         allowAuth: false,
       });
       const payload = await unwrapResponse(response);
@@ -126,13 +138,13 @@ async function refreshStoredAuth(currentAuth) {
   return refreshPromise;
 }
 
-function shouldRefresh(path, currentAuth) {
-  return Boolean(
-    currentAuth?.refresh_token &&
-      path !== "/v1/auth/login" &&
-      path !== "/v1/auth/register" &&
-      path !== "/v1/auth/refresh",
-  );
+function shouldRefresh(path) {
+  return ![
+    "/v1/auth/login",
+    "/v1/auth/register",
+    "/v1/auth/refresh",
+    "/v1/auth/logout",
+  ].includes(path);
 }
 
 async function performRequest(path, options = {}) {
@@ -148,6 +160,7 @@ async function performRequest(path, options = {}) {
   return fetch(`/backend${path}`, {
     method,
     cache,
+    credentials: "same-origin",
     headers: requestHeaders,
     body: body === undefined ? undefined : JSON.stringify(body),
   });

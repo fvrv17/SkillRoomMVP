@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { apiFetch, loadAuth, loadRegionId, saveAuth, saveRegionId } from "@/lib/client";
+import { apiFetch, loadAuth, loadRegionId, restoreAuth, saveAuth, saveRegionId } from "@/lib/client";
 import { REGIONS } from "@/lib/preview-data";
 
 const emptyRegister = {
@@ -32,6 +32,15 @@ export default function LandingClient() {
   useEffect(() => {
     setRegionId(loadRegionId());
     setHasSession(Boolean(loadAuth()));
+    let active = true;
+    restoreAuth().then((auth) => {
+      if (active) {
+        setHasSession(Boolean(auth));
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const region = useMemo(

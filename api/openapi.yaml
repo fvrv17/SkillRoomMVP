@@ -66,22 +66,46 @@ paths:
       tags: [Auth]
       summary: Refresh an access token
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+            example:
+              refresh_token: rfr_example
+      responses:
+        '200':
+          description: Refreshed auth tokens and rotated cookies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Clear the current auth session
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
               properties:
                 refresh_token:
                   type: string
       responses:
         '200':
-          description: Refreshed auth tokens
+          description: Session cleared
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthResponse'
+                type: object
+                properties:
+                  status:
+                    type: string
   /v1/me:
     get:
       tags: [Profile]

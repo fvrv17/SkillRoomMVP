@@ -1,16 +1,24 @@
 package runner
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +31,7 @@ const (
 
 type DockerConfig struct {
 	DockerBinary   string
+	DockerHost     string
 	SandboxImage   string
 	SandboxCommand string
 	DefaultCPU     string
@@ -31,13 +40,15 @@ type DockerConfig struct {
 }
 
 type DockerEngine struct {
-	config DockerConfig
+	config         DockerConfig
+	client         *http.Client
+	baseURL        string
+	mu             sync.Mutex
+	lastReadyCheck time.Time
+	lastReadyErr   error
 }
 
-func NewDockerEngine(config DockerConfig) DockerEngine {
-	if strings.TrimSpace(config.DockerBinary) == "" {
-		config.DockerBinary = "docker"
-	}
+func NewDockerEngine(config DockerConfig) *DockerEngine {
 	if strings.TrimSpace(config.SandboxCommand) == "" {
 		config.SandboxCommand = defaultSandboxCommand
 	}
@@ -50,10 +61,16 @@ func NewDockerEngine(config DockerConfig) DockerEngine {
 	if config.DefaultTimeout <= 0 {
 		config.DefaultTimeout = defaultTimeout
 	}
-	return DockerEngine{config: config}
+	config.DockerHost = firstNonEmpty(config.DockerHost, os.Getenv("RUNNER_DOCKER_HOST"), os.Getenv("DOCKER_HOST"), "unix:///var/run/docker.sock")
+	client, baseURL := dockerAPIClient(config.DockerHost)
+	return &DockerEngine{
+		config:  config,
+		client:  client,
+		baseURL: baseURL,
+	}
 }
 
-func (e DockerEngine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
+func (e *DockerEngine) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if strings.TrimSpace(req.Language) == "" {
 		return RunResult{}, errors.New("language is required")
 	}
@@ -86,38 +103,36 @@ func (e DockerEngine) Run(ctx context.Context, req RunRequest) (RunResult, error
 	}
 
 	containerName := fmt.Sprintf("skillroom-run-%d", time.Now().UTC().UnixNano())
-	createArgs := []string{
-		"create",
-		"--name", containerName,
-		"--entrypoint", "sh",
-		"--network", "none",
-		"--cpus", firstNonEmpty(req.CPUFraction, e.config.DefaultCPU),
-		"--memory", fmt.Sprintf("%dm", maxInt(req.MemoryMB, e.config.DefaultMemory)),
-		"--pids-limit", "512",
-		"--ulimit", "nproc=512:512",
-		"--cap-drop=ALL",
-		"--security-opt", "no-new-privileges",
-		"--workdir", "/workspace",
-		e.config.SandboxImage,
-		"-lc", e.config.SandboxCommand,
-	}
-	if _, _, err := e.runDocker(runCtx, createArgs...); err != nil {
+	containerID, err := e.createContainer(runCtx, containerName, e.config.SandboxCommand, req.CPUFraction, req.MemoryMB)
+	if err != nil {
 		return RunResult{}, err
 	}
 	defer func() {
-		_, _, _ = e.runDocker(context.Background(), "rm", "-f", containerName)
+		_ = e.removeContainer(context.Background(), containerID)
 	}()
 
-	if _, _, err := e.runDocker(runCtx, "cp", workspaceDir+"/.", containerName+":/workspace"); err != nil {
+	if err := e.copyWorkspace(runCtx, containerID, workspaceDir); err != nil {
 		return RunResult{}, err
 	}
 
-	stdout, stderr, err := e.runDocker(runCtx, "start", "-a", containerName)
+	if runCtx.Err() == context.DeadlineExceeded {
+		return RunResult{Errors: []string{"sandbox execution timed out"}}, errors.New("sandbox execution timed out")
+	}
+	if err := e.startContainer(runCtx, containerID); err != nil {
+		return RunResult{}, err
+	}
+
+	exitStatus, err := e.waitContainer(runCtx, containerID)
 	if runCtx.Err() == context.DeadlineExceeded {
 		return RunResult{Errors: []string{"sandbox execution timed out"}}, errors.New("sandbox execution timed out")
 	}
 	if err != nil {
-		return RunResult{}, fmt.Errorf("sandbox execution failed: %w: %s", err, strings.TrimSpace(stderr))
+		return RunResult{}, err
+	}
+
+	stdout, stderr, err := e.readContainerLogs(runCtx, containerID)
+	if err != nil {
+		return RunResult{}, err
 	}
 
 	result, err := parseRunResult(stdout)
@@ -127,17 +142,347 @@ func (e DockerEngine) Run(ctx context.Context, req RunRequest) (RunResult, error
 	if trimmed := strings.TrimSpace(stderr); trimmed != "" {
 		result.Errors = append(result.Errors, trimmed)
 	}
+	if exitStatus != 0 {
+		result.Errors = append(result.Errors, fmt.Sprintf("sandbox exited with status %d", exitStatus))
+	}
 	return result, nil
 }
 
-func (e DockerEngine) runDocker(ctx context.Context, args ...string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, e.config.DockerBinary, args...)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return stdout.String(), stderr.String(), err
+func (e *DockerEngine) Ready(ctx context.Context) error {
+	if e == nil {
+		return errors.New("runner engine is not configured")
+	}
+	e.mu.Lock()
+	if !e.lastReadyCheck.IsZero() && time.Since(e.lastReadyCheck) < 15*time.Second {
+		err := e.lastReadyErr
+		e.mu.Unlock()
+		return err
+	}
+	e.mu.Unlock()
+
+	readyCtx := ctx
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		readyCtx, cancel = context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
+	}
+	err := e.probeReadiness(readyCtx)
+
+	e.mu.Lock()
+	e.lastReadyCheck = time.Now().UTC()
+	e.lastReadyErr = err
+	e.mu.Unlock()
+	return err
+}
+
+func (e *DockerEngine) probeReadiness(ctx context.Context) error {
+	if strings.TrimSpace(e.config.SandboxImage) == "" {
+		return errors.New("sandbox image is required")
+	}
+	if err := e.inspectSandboxImage(ctx); err != nil {
+		return err
+	}
+	containerID, err := e.createContainer(
+		ctx,
+		fmt.Sprintf("skillroom-ready-%d", time.Now().UTC().UnixNano()),
+		"test -f /opt/skillroom-runtime/run-evaluation.mjs && node --version >/dev/null",
+		e.config.DefaultCPU,
+		e.config.DefaultMemory,
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = e.removeContainer(context.Background(), containerID)
+	}()
+	if err := e.startContainer(ctx, containerID); err != nil {
+		return err
+	}
+	status, err := e.waitContainer(ctx, containerID)
+	if err != nil {
+		return err
+	}
+	if status != 0 {
+		stdout, stderr, _ := e.readContainerLogs(ctx, containerID)
+		return fmt.Errorf("start sandbox probe: exited with status %d: %s %s", status, strings.TrimSpace(stdout), strings.TrimSpace(stderr))
+	}
+	return nil
+}
+
+func (e *DockerEngine) inspectSandboxImage(ctx context.Context) error {
+	path := fmt.Sprintf("/images/%s/json", dockerPathEscape(e.config.SandboxImage))
+	resp, err := e.doDockerRequest(ctx, http.MethodGet, path, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("inspect sandbox image: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("inspect sandbox image: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (e *DockerEngine) createContainer(ctx context.Context, name, command, cpuFraction string, memoryMB int) (string, error) {
+	payload := map[string]any{
+		"Image":      e.config.SandboxImage,
+		"WorkingDir": "/workspace",
+		"User":       "0:0",
+		"Entrypoint": []string{"sh"},
+		"Cmd":        []string{"-lc", command},
+		"HostConfig": map[string]any{
+			"NetworkMode": "none",
+			"NanoCpus":    cpuFractionToNano(firstNonEmpty(cpuFraction, e.config.DefaultCPU)),
+			"Memory":      int64(maxInt(memoryMB, e.config.DefaultMemory)) * 1024 * 1024,
+			"PidsLimit":   int64(512),
+			"CapDrop":     []string{"ALL"},
+			"SecurityOpt": []string{"no-new-privileges"},
+			"Ulimits": []map[string]any{
+				{"Name": "nproc", "Soft": 512, "Hard": 512},
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	resp, err := e.doDockerRequest(ctx, http.MethodPost, "/containers/create", map[string]string{"name": name}, bytes.NewReader(body), "application/json")
+	if err != nil {
+		return "", fmt.Errorf("create sandbox container: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("create sandbox container: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var result struct {
+		ID string `json:"Id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode created container: %w", err)
+	}
+	if strings.TrimSpace(result.ID) == "" {
+		return "", errors.New("docker did not return a container id")
+	}
+	return result.ID, nil
+}
+
+func (e *DockerEngine) copyWorkspace(ctx context.Context, containerID, workspaceDir string) error {
+	archive, err := tarWorkspace(workspaceDir)
+	if err != nil {
+		return err
+	}
+	resp, err := e.doDockerRequest(ctx, http.MethodPut, "/containers/"+containerID+"/archive", map[string]string{"path": "/workspace"}, bytesReader(archive), "application/x-tar")
+	if err != nil {
+		return fmt.Errorf("copy workspace into sandbox: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("copy workspace into sandbox: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (e *DockerEngine) startContainer(ctx context.Context, containerID string) error {
+	resp, err := e.doDockerRequest(ctx, http.MethodPost, "/containers/"+containerID+"/start", nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("start sandbox container: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("start sandbox container: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (e *DockerEngine) waitContainer(ctx context.Context, containerID string) (int64, error) {
+	resp, err := e.doDockerRequest(ctx, http.MethodPost, "/containers/"+containerID+"/wait", map[string]string{"condition": "not-running"}, nil, "")
+	if err != nil {
+		return 0, fmt.Errorf("wait for sandbox container: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return 0, fmt.Errorf("wait for sandbox container: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var result struct {
+		StatusCode int64 `json:"StatusCode"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode wait response: %w", err)
+	}
+	return result.StatusCode, nil
+}
+
+func (e *DockerEngine) readContainerLogs(ctx context.Context, containerID string) (string, string, error) {
+	resp, err := e.doDockerRequest(ctx, http.MethodGet, "/containers/"+containerID+"/logs", map[string]string{
+		"stdout": "1",
+		"stderr": "1",
+	}, nil, "")
+	if err != nil {
+		return "", "", fmt.Errorf("read sandbox logs: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", "", fmt.Errorf("read sandbox logs: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return demuxDockerStream(resp.Body)
+}
+
+func (e *DockerEngine) removeContainer(ctx context.Context, containerID string) error {
+	resp, err := e.doDockerRequest(ctx, http.MethodDelete, "/containers/"+containerID, map[string]string{"force": "1"}, nil, "")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("remove sandbox container: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (e *DockerEngine) doDockerRequest(ctx context.Context, method, path string, query map[string]string, body io.Reader, contentType string) (*http.Response, error) {
+	reqURL := e.baseURL + path
+	if len(query) > 0 {
+		values := make([]string, 0, len(query))
+		for key, value := range query {
+			values = append(values, url.QueryEscape(key)+"="+url.QueryEscape(value))
+		}
+		sort.Strings(values)
+		reqURL += "?" + strings.Join(values, "&")
+	}
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, body)
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	return e.client.Do(req)
+}
+
+func dockerAPIClient(host string) (*http.Client, string) {
+	host = strings.TrimSpace(host)
+	if host == "" || strings.HasPrefix(host, "unix://") {
+		socketPath := strings.TrimPrefix(firstNonEmpty(host, "unix:///var/run/docker.sock"), "unix://")
+		transport := &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
+			},
+		}
+		return &http.Client{Transport: transport}, "http://docker"
+	}
+	if strings.HasPrefix(host, "tcp://") {
+		host = "http://" + strings.TrimPrefix(host, "tcp://")
+	}
+	return &http.Client{}, strings.TrimRight(host, "/")
+}
+
+func tarWorkspace(root string) ([]byte, error) {
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+
+	err := filepath.Walk(root, func(currentPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relPath, err := filepath.Rel(root, currentPath)
+		if err != nil {
+			return err
+		}
+		if relPath == "." {
+			return nil
+		}
+		relPath = filepath.ToSlash(relPath)
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		header.Name = relPath
+		if info.IsDir() && !strings.HasSuffix(header.Name, "/") {
+			header.Name += "/"
+		}
+		if err := writer.WriteHeader(header); err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		file, err := os.Open(currentPath)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(writer, file)
+		closeErr := file.Close()
+		if err != nil {
+			return err
+		}
+		return closeErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+func bytesReader(data []byte) io.Reader {
+	return bytes.NewReader(data)
+}
+
+func demuxDockerStream(body io.Reader) (string, string, error) {
+	payload, err := io.ReadAll(body)
+	if err != nil {
+		return "", "", err
+	}
+	if len(payload) < 8 {
+		return string(payload), "", nil
+	}
+	reader := bytes.NewReader(payload)
+	var stdout strings.Builder
+	var stderr strings.Builder
+	for reader.Len() > 0 {
+		header := make([]byte, 8)
+		if _, err := io.ReadFull(reader, header); err != nil {
+			return string(payload), "", nil
+		}
+		size := binary.BigEndian.Uint32(header[4:])
+		if size == 0 {
+			continue
+		}
+		chunk := make([]byte, size)
+		if _, err := io.ReadFull(reader, chunk); err != nil {
+			return string(payload), "", nil
+		}
+		switch header[0] {
+		case 1:
+			stdout.Write(chunk)
+		case 2:
+			stderr.Write(chunk)
+		default:
+			stdout.Write(chunk)
+		}
+	}
+	return stdout.String(), stderr.String(), nil
+}
+
+func dockerPathEscape(value string) string {
+	return url.PathEscape(value)
+}
+
+func cpuFractionToNano(value string) int64 {
+	value = firstNonEmpty(value, defaultCPUFraction)
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed <= 0 {
+		parsed = 0.5
+	}
+	return int64(math.Round(parsed * 1_000_000_000))
 }
 
 type workspaceManifest struct {

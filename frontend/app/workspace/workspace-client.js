@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { apiFetch, clearAuth, isUnauthorizedError, loadAuth, loadRegionId, subscribeAuth } from "@/lib/client";
+import { apiFetch, isUnauthorizedError, loadAuth, loadRegionId, restoreAuth, signOut, subscribeAuth } from "@/lib/client";
 import { REGIONS } from "@/lib/preview-data";
 import {
   ROOM_DEFAULT_FLOOR_STYLE,
@@ -77,14 +77,9 @@ export default function WorkspaceClient() {
   const roomThemeID = ROOM_DEFAULT_THEME_ID;
 
   useEffect(() => {
-    const auth = loadAuth();
+    let active = true;
     const region = REGIONS.find((item) => item.id === loadRegionId()) || REGIONS[0];
-    const nextSession = { auth, region };
-    setSession(nextSession);
-    setActiveView(defaultView(auth?.user?.role));
-    setBooting(false);
-
-    return subscribeAuth(
+    const unsubscribe = subscribeAuth(
       (nextAuth) => {
         setSession((current) => ({ ...(current || { region }), auth: nextAuth || null }));
       },
@@ -92,6 +87,22 @@ export default function WorkspaceClient() {
         setSession((current) => ({ ...(current || { region }), auth: null }));
       },
     );
+
+    (async () => {
+      const auth = loadAuth() || await restoreAuth();
+      if (!active) {
+        return;
+      }
+      const nextSession = { auth, region };
+      setSession(nextSession);
+      setActiveView(defaultView(nextSession.auth?.user?.role));
+      setBooting(false);
+    })();
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -116,7 +127,6 @@ export default function WorkspaceClient() {
     [data.roomCustomization, cosmeticInventory.equipped],
   );
   const windowSceneID = roomCustomization.windowSceneID || ROOM_DEFAULT_WINDOW_SCENE_ID;
-  const token = session?.auth?.access_token || "";
   const isHR = user.role === "hr";
   const allowedNav = useMemo(() => (isHR ? HR_NAV_ITEMS : DEVELOPER_NAV_ITEMS), [isHR]);
   const editableFiles = currentChallenge?.editableFiles || [];
@@ -222,15 +232,16 @@ export default function WorkspaceClient() {
     setProfileNotice("");
 
     try {
-      if (!currentSession.auth?.access_token) {
-        return;
+      const restoredAuth = currentSession.auth || await restoreAuth();
+      if (restoredAuth && restoredAuth !== currentSession.auth) {
+        setSession((current) => ({ ...(current || { region: currentSession.region }), auth: restoredAuth }));
       }
 
-      const me = await apiFetch("/v1/me", { token: currentSession.auth.access_token });
+      const me = await apiFetch("/v1/me");
       if (me.role === "hr") {
         const [candidatePayload, leaderboardPayload] = await Promise.all([
-          fetchCandidates(currentSession.auth.access_token, filters),
-          fetchHRLeaderboard(currentSession.auth.access_token),
+          fetchCandidates(filters),
+          fetchHRLeaderboard(),
         ]);
         setData({
           user: me,
@@ -247,13 +258,13 @@ export default function WorkspaceClient() {
         });
       } else {
         const [profilePayload, skillsPayload, roomPayload, templatesPayload, rankingPayload, monetizationPayload, cosmeticsPayload] = await Promise.all([
-          apiFetch("/v1/profile", { token: currentSession.auth.access_token }),
-          apiFetch("/v1/skills", { token: currentSession.auth.access_token }),
-          apiFetch("/v1/room", { token: currentSession.auth.access_token }),
-          apiFetch("/v1/challenges/templates", { token: currentSession.auth.access_token }),
-          apiFetch("/v1/rankings/global", { token: currentSession.auth.access_token }),
-          apiFetch("/v1/monetization/summary", { token: currentSession.auth.access_token }),
-          fetchCosmeticInventory(currentSession.auth.access_token),
+          apiFetch("/v1/profile"),
+          apiFetch("/v1/skills"),
+          apiFetch("/v1/room"),
+          apiFetch("/v1/challenges/templates"),
+          apiFetch("/v1/rankings/global"),
+          apiFetch("/v1/monetization/summary"),
+          fetchCosmeticInventory(),
         ]);
         setData({
           user: me,
@@ -283,17 +294,14 @@ export default function WorkspaceClient() {
   }
 
   async function refreshAfterSubmission(profilePayload, skillsPayload, roomPayload) {
-    if (!token) {
-      return;
-    }
-    const rankingPayload = await apiFetch("/v1/rankings/global", { token });
+    const rankingPayload = await apiFetch("/v1/rankings/global");
     let nextCandidates = data.candidates;
     let nextLeaderboard = data.leaderboard;
     let nextMonetization = data.monetization;
     if (user.role === "hr") {
       const [candidatePayload, leaderboardPayload] = await Promise.all([
-        fetchCandidates(token, filters),
-        fetchHRLeaderboard(token),
+        fetchCandidates(filters),
+        fetchHRLeaderboard(),
       ]);
       nextCandidates = candidatePayload.candidates || [];
       nextLeaderboard = leaderboardPayload.rankings || [];
@@ -313,14 +321,14 @@ export default function WorkspaceClient() {
   }
 
   async function handleApplyFilters() {
-    if (!token || user.role !== "hr") {
+    if (user.role !== "hr") {
       return;
     }
 
     setBusyAction("filters");
     setError("");
     try {
-      const candidatePayload = await fetchCandidates(token, filters);
+      const candidatePayload = await fetchCandidates(filters);
       setData((current) => ({
         ...current,
         candidates: candidatePayload.candidates || [],
@@ -335,13 +343,13 @@ export default function WorkspaceClient() {
   }
 
   async function handleOpenCandidate(userID) {
-    if (!token || user.role !== "hr") {
+    if (user.role !== "hr") {
       return;
     }
     setBusyAction(`candidate:${userID}`);
     setError("");
     try {
-      const payload = await fetchCandidateDetail(token, userID);
+      const payload = await fetchCandidateDetail(userID);
       setSelectedCandidate(payload);
       setSelectedCandidateRoomCode("");
       setVisibleCandidateRoomPopoverCode("");
@@ -357,17 +365,17 @@ export default function WorkspaceClient() {
   }
 
   async function handleUnlockCandidate(userID) {
-    if (!token || user.role !== "hr") {
+    if (user.role !== "hr") {
       return;
     }
     setBusyAction(`unlock:${userID}`);
     setError("");
     try {
-      const payload = await unlockCandidate(token, userID);
+      const payload = await unlockCandidate(userID);
       setSelectedCandidate(payload);
       const [candidatePayload, leaderboardPayload] = await Promise.all([
-        fetchCandidates(token, filters),
-        fetchHRLeaderboard(token),
+        fetchCandidates(filters),
+        fetchHRLeaderboard(),
       ]);
       setData((current) => ({
         ...current,
@@ -383,17 +391,17 @@ export default function WorkspaceClient() {
   }
 
   async function handleInviteCandidate(userID) {
-    if (!token || user.role !== "hr") {
+    if (user.role !== "hr") {
       return;
     }
     setBusyAction(`invite:${userID}`);
     setError("");
     try {
-      const payload = await inviteCandidate(token, userID);
+      const payload = await inviteCandidate(userID);
       setSelectedCandidate(payload);
       const [candidatePayload, leaderboardPayload] = await Promise.all([
-        fetchCandidates(token, filters),
-        fetchHRLeaderboard(token),
+        fetchCandidates(filters),
+        fetchHRLeaderboard(),
       ]);
       setData((current) => ({
         ...current,
@@ -409,13 +417,13 @@ export default function WorkspaceClient() {
   }
 
   async function handleOpenCandidateRoom(userID) {
-    if (!token || user.role !== "hr") {
+    if (user.role !== "hr") {
       return;
     }
     setBusyAction(`room:${userID}`);
     setError("");
     try {
-      const payload = await fetchCandidateDetail(token, userID);
+      const payload = await fetchCandidateDetail(userID);
       setSelectedCandidate(payload);
       setSelectedCandidateRoomCode("");
       setVisibleCandidateRoomPopoverCode("");
@@ -432,7 +440,7 @@ export default function WorkspaceClient() {
   }
 
   async function handleSaveProfile() {
-    if (!token || isHR) {
+    if (isHR) {
       return;
     }
     setBusyAction("profile");
@@ -441,7 +449,6 @@ export default function WorkspaceClient() {
     try {
       const payload = await apiFetch("/v1/profile", {
         method: "PATCH",
-        token,
         body: {
           linkedin_url: linkedInDraft,
         },
@@ -464,13 +471,13 @@ export default function WorkspaceClient() {
   }
 
   async function handleEquipCosmetic(cosmeticCode) {
-    if (!token || isHR) {
+    if (isHR) {
       return;
     }
     setBusyAction(`equip:${cosmeticCode}`);
     setError("");
     try {
-      const payload = await equipCosmetic(token, cosmeticCode);
+      const payload = await equipCosmetic(cosmeticCode);
       setData((current) => ({
         ...current,
         cosmetics: payload,
@@ -511,7 +518,6 @@ export default function WorkspaceClient() {
     try {
       const view = await apiFetch("/v1/challenges/instances", {
         method: "POST",
-        token,
         body: { template_id: templateID },
       });
       const nextChallenge = normalizeChallenge(view);
@@ -525,14 +531,13 @@ export default function WorkspaceClient() {
   }
 
   async function recordTelemetry(eventType, payload = {}) {
-    if (!token || !currentChallenge?.instanceId) {
+    if (!currentChallenge?.instanceId) {
       return;
     }
     const offsetSeconds = Math.max(0, Math.round((Date.now() - telemetryRef.current.startedAtMs) / 1000));
     try {
       await apiFetch(`/v1/challenges/instances/${currentChallenge.instanceId}/telemetry`, {
         method: "POST",
-        token,
         body: {
           event_type: eventType,
           offset_seconds: offsetSeconds,
@@ -588,7 +593,6 @@ export default function WorkspaceClient() {
       await recordTelemetry("snapshot", { files: editableFiles.length });
       const payload = await apiFetch(`/v1/challenges/instances/${currentChallenge.instanceId}/runs`, {
         method: "POST",
-        token,
         body: {
           language: "jsx",
           source_files: editableSourceFiles(currentChallenge),
@@ -614,7 +618,6 @@ export default function WorkspaceClient() {
       await recordTelemetry("snapshot", { files: editableFiles.length, action: "submit" });
       const payload = await apiFetch(`/v1/challenges/instances/${currentChallenge.instanceId}/submissions`, {
         method: "POST",
-        token,
         body: {
           language: "jsx",
           source_files: editableSourceFiles(currentChallenge),
@@ -643,7 +646,6 @@ export default function WorkspaceClient() {
     try {
       const payload = await apiFetch(`/v1/ai/challenges/${currentChallenge.instanceId}/hint`, {
         method: "POST",
-        token,
         body: {},
       });
       setHintResult(payload);
@@ -664,7 +666,6 @@ export default function WorkspaceClient() {
     try {
       const payload = await apiFetch(`/v1/ai/challenges/${currentChallenge.instanceId}/explain`, {
         method: "POST",
-        token,
         body: { submission_id: submissionResult.submission?.id },
       });
       setExplanationResult(payload);
@@ -675,8 +676,8 @@ export default function WorkspaceClient() {
     }
   }
 
-  function handleSignOut() {
-    clearAuth();
+  async function handleSignOut() {
+    await signOut();
     router.push("/");
   }
 
@@ -1478,7 +1479,7 @@ function editableSourceFiles(challenge) {
   return files;
 }
 
-async function fetchCandidates(token, filters) {
+async function fetchCandidates(filters) {
   const query = new URLSearchParams();
   if (filters.minScore) {
     query.set("min_score", filters.minScore);
@@ -1489,39 +1490,36 @@ async function fetchCandidates(token, filters) {
   if (filters.activeDays) {
     query.set("active_days", filters.activeDays);
   }
-  return apiFetch(`/v1/hr/candidates?${query.toString()}`, { token });
+  return apiFetch(`/v1/hr/candidates?${query.toString()}`);
 }
 
-async function fetchHRLeaderboard(token) {
-  return apiFetch("/v1/hr/leaderboard", { token });
+async function fetchHRLeaderboard() {
+  return apiFetch("/v1/hr/leaderboard");
 }
 
-async function fetchCandidateDetail(token, userID) {
-  return apiFetch(`/v1/hr/candidates/${userID}`, { token });
+async function fetchCandidateDetail(userID) {
+  return apiFetch(`/v1/hr/candidates/${userID}`);
 }
 
-async function fetchCosmeticInventory(token) {
-  return apiFetch("/v1/dev/cosmetics/inventory", { token });
+async function fetchCosmeticInventory() {
+  return apiFetch("/v1/dev/cosmetics/inventory");
 }
 
-async function unlockCandidate(token, userID) {
+async function unlockCandidate(userID) {
   return apiFetch(`/v1/hr/candidates/${userID}/unlock`, {
     method: "POST",
-    token,
   });
 }
 
-async function inviteCandidate(token, userID) {
+async function inviteCandidate(userID) {
   return apiFetch(`/v1/hr/candidates/${userID}/invite`, {
     method: "POST",
-    token,
   });
 }
 
-async function equipCosmetic(token, cosmeticCode) {
+async function equipCosmetic(cosmeticCode) {
   return apiFetch("/v1/dev/cosmetics/equip", {
     method: "POST",
-    token,
     body: {
       cosmetic_code: cosmeticCode,
     },

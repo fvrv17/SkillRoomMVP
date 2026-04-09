@@ -28,6 +28,11 @@ spec:
       labels:
         app: runner
     spec:
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
       containers:
         - name: runner
           image: ghcr.io/fvrv17/mvp-runner:latest
@@ -38,6 +43,8 @@ spec:
           env:
             - name: RUNNER_ADDR
               value: ":8081"
+            - name: RUNNER_DOCKER_HOST
+              value: "http://127.0.0.1:2375"
           readinessProbe:
             httpGet:
               path: /readyz
@@ -57,3 +64,36 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+        - name: runner-docker-proxy
+          image: ghcr.io/fvrv17/mvp-runner-docker-proxy:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 2375
+              name: docker-proxy
+          env:
+            - name: RUNNER_DOCKER_PROXY_ADDR
+              value: ":2375"
+            - name: RUNNER_DOCKER_SOCKET
+              value: "/var/run/docker.sock"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: docker-proxy
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: docker-proxy
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
