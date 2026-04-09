@@ -53,6 +53,12 @@ func TestPersistentAppRestoresStateAcrossRestart(t *testing.T) {
 		{EventType: "input", OffsetSeconds: 12},
 		{EventType: "snapshot", OffsetSeconds: 37},
 	})
+	equipResp := performJSON(t, router, http.MethodPost, "/v1/dev/cosmetics/equip", EquipCosmeticRequest{
+		CosmeticCode: "window_sunset_default",
+	}, auth.AccessToken)
+	if equipResp.Code != http.StatusOK {
+		t.Fatalf("equip cosmetic before restart: %d", equipResp.Code)
+	}
 	instanceID := result.Submission.ChallengeInstanceID
 
 	if err := app.Close(); err != nil {
@@ -136,8 +142,11 @@ func TestPersistentAppRestoresStateAcrossRestart(t *testing.T) {
 	if err := json.NewDecoder(inventoryResp.Body).Decode(&inventory); err != nil {
 		t.Fatalf("decode cosmetic inventory after restart: %v", err)
 	}
-	if len(inventory.Owned) != 3 || len(inventory.Equipped) != 3 {
+	if len(inventory.Owned) != 6 || len(inventory.Equipped) != 3 {
 		t.Fatalf("expected persisted default cosmetics after restart, owned=%d equipped=%d", len(inventory.Owned), len(inventory.Equipped))
+	}
+	if equippedCosmeticForSlot(inventory.Equipped, "window_scene") != "window_sunset_default" {
+		t.Fatalf("expected sunset window to persist across restart, got %s", equippedCosmeticForSlot(inventory.Equipped, "window_scene"))
 	}
 
 	instanceResp := performJSON(t, reloadedRouter, http.MethodGet, "/v1/challenges/instances/"+instanceID, nil, refreshed.AccessToken)

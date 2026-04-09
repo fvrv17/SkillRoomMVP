@@ -37,10 +37,120 @@ export const ROOM_WINDOW_SCENES = {
 
 export const ROOM_DEFAULT_THEME_ID = "classic";
 export const ROOM_DEFAULT_WINDOW_SCENE_ID = "daylight";
+export const ROOM_DEFAULT_WALL_STYLE = "wall_cream_default";
+export const ROOM_DEFAULT_FLOOR_STYLE = "floor_oak_default";
 
 function buildItemAssets(code) {
   return Object.fromEntries(ROOM_LEVELS.map((level) => [level, roomAssetPath(code, level)]));
 }
+
+export const ROOM_WALL_STYLES = {
+  wall_cream_default: {
+    code: "wall_cream_default",
+    label: "Studio Cream",
+    preview: "Warm neutral",
+    premium: false,
+    className: "room-stage__wall-tint--cream",
+  },
+  wall_sand_default: {
+    code: "wall_sand_default",
+    label: "Soft Sand",
+    preview: "Muted sand",
+    premium: false,
+    className: "room-stage__wall-tint--sand",
+  },
+  wall_graphite_plus: {
+    code: "wall_graphite_plus",
+    label: "Graphite",
+    preview: "Premium dark",
+    premium: true,
+    className: "room-stage__wall-tint--graphite",
+  },
+};
+
+export const ROOM_FLOOR_STYLES = {
+  floor_oak_default: {
+    code: "floor_oak_default",
+    label: "Light Oak",
+    preview: "Base floor",
+    premium: false,
+    className: "room-stage__floor-tint--oak",
+  },
+  floor_honey_default: {
+    code: "floor_honey_default",
+    label: "Honey Oak",
+    preview: "Warm oak",
+    premium: false,
+    className: "room-stage__floor-tint--honey",
+  },
+  floor_charcoal_plus: {
+    code: "floor_charcoal_plus",
+    label: "Charcoal",
+    preview: "Premium dark",
+    premium: true,
+    className: "room-stage__floor-tint--charcoal",
+  },
+};
+
+export const ROOM_DECOR_SLOTS = {
+  decor_left: {
+    slotCode: "decor_left",
+    label: "Left decor",
+    style: {
+      left: "24.4%",
+      bottom: "33%",
+      width: "9.6%",
+      height: "13.4%",
+      zIndex: 15,
+    },
+  },
+  decor_right: {
+    slotCode: "decor_right",
+    label: "Right decor",
+    style: {
+      right: "13.4%",
+      top: "19.8%",
+      width: "8.8%",
+      height: "17%",
+      zIndex: 16,
+    },
+  },
+  decor_wall: {
+    slotCode: "decor_wall",
+    label: "Wall decor",
+    style: {
+      left: "12.8%",
+      top: "16.8%",
+      width: "10.4%",
+      height: "25%",
+      zIndex: 14,
+    },
+  },
+};
+
+export const ROOM_DECOR_ITEMS = {
+  decor_books_orange: {
+    code: "decor_books_orange",
+    slotCode: "decor_left",
+    label: "Orange Book Stack",
+    premium: true,
+    className: "room-decor--books-orange",
+  },
+  decor_lamp_black: {
+    code: "decor_lamp_black",
+    slotCode: "decor_right",
+    label: "Black Studio Lamp",
+    premium: true,
+    className: "room-decor--lamp-black",
+  },
+  decor_poster_grid: {
+    code: "decor_poster_grid",
+    slotCode: "decor_wall",
+    label: "Grid Poster",
+    premium: true,
+    className: "room-decor--poster-grid",
+  },
+};
 
 export const ROOM_SCENE_ORDER = ["shelf", "trophy_case", "monitor", "desk", "chair", "plant"];
 
@@ -156,6 +266,44 @@ export function normalizeRoomTheme(themeID) {
 
 export function normalizeWindowScene(sceneID) {
   return ROOM_WINDOW_SCENES[sceneID] ? sceneID : ROOM_DEFAULT_WINDOW_SCENE_ID;
+}
+
+export function resolveRoomCustomization(equipped = []) {
+  const equippedMap = Object.fromEntries((equipped || []).map((item) => [item.slot_code, item.cosmetic_code]));
+  const windowCode = equippedMap.window_scene || "window_daylight_default";
+  const wallCode = ROOM_WALL_STYLES[equippedMap.wall_style] ? equippedMap.wall_style : ROOM_DEFAULT_WALL_STYLE;
+  const floorCode = ROOM_FLOOR_STYLES[equippedMap.floor_style] ? equippedMap.floor_style : ROOM_DEFAULT_FLOOR_STYLE;
+  const decor = Object.entries(ROOM_DECOR_SLOTS)
+    .map(([slotCode, slot]) => {
+      const cosmeticCode = equippedMap[slotCode];
+      if (!cosmeticCode || !ROOM_DECOR_ITEMS[cosmeticCode]) {
+        return null;
+      }
+      return {
+        slotCode,
+        ...slot,
+        ...ROOM_DECOR_ITEMS[cosmeticCode],
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    windowSceneID: windowSceneForCosmetic(windowCode),
+    wallStyle: ROOM_WALL_STYLES[wallCode],
+    floorStyle: ROOM_FLOOR_STYLES[floorCode],
+    decor,
+  };
+}
+
+function windowSceneForCosmetic(cosmeticCode) {
+  switch (cosmeticCode) {
+    case "window_sunset_default":
+      return "sunset";
+    case "window_night_plus":
+      return "night";
+    default:
+      return ROOM_DEFAULT_WINDOW_SCENE_ID;
+  }
 }
 
 export function roomAssetPath(code, level) {

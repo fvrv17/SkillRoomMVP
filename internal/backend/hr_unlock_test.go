@@ -103,6 +103,9 @@ func TestHRCandidatePreviewAndUnlockFlow(t *testing.T) {
 	if len(unlocked.Room) == 0 {
 		t.Fatal("expected unlocked room after candidate unlock")
 	}
+	if len(unlocked.RoomCustomization.Equipped) != 3 {
+		t.Fatalf("expected candidate room customization to be included after unlock, got %d equipped cosmetics", len(unlocked.RoomCustomization.Equipped))
+	}
 	if len(unlocked.RecentSubmissions) == 0 {
 		t.Fatal("expected recent submissions after candidate unlock")
 	}

@@ -157,6 +157,10 @@ type ShortlistRequest struct {
 	Notes     string `json:"notes"`
 }
 
+type EquipCosmeticRequest struct {
+	CosmeticCode string `json:"cosmetic_code"`
+}
+
 func NewApp(secret, issuer string) *App {
 	app := &App{
 		tokens:            security.NewTokenManager(secret, issuer),
@@ -288,6 +292,7 @@ func (a *App) Router() http.Handler {
 			r.Get("/room", a.handleRoom)
 			r.Get("/dev/cosmetics/catalog", a.handleListCosmeticCatalog)
 			r.Get("/dev/cosmetics/inventory", a.handleCosmeticInventory)
+			r.Post("/dev/cosmetics/equip", a.handleEquipCosmetic)
 			r.Get("/challenges/templates", a.handleListTemplates)
 			r.Post("/challenges/instances", a.handleStartChallenge)
 			r.Get("/challenges/instances/{instanceID}", a.handleGetInstance)
@@ -419,7 +424,12 @@ func (a *App) handleRoom(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": a.listUserRoomItems(user.ID)})
+	view, err := a.roomView(r.Context(), user.ID)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, view)
 }
 
 func (a *App) handleListTemplates(w http.ResponseWriter, r *http.Request) {
@@ -1639,6 +1649,25 @@ func (a *App) listUserRoomItems(userID string) []UserRoomItem {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.listUserRoomItemsLocked(userID)
+}
+
+func (a *App) roomView(ctx context.Context, userID string) (map[string]any, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	user, ok := a.users[userID]
+	if !ok {
+		return nil, errors.New("user not found")
+	}
+	if roleSupportsDeveloperRoom(user.Role) && a.syncDeveloperCosmeticsLocked(userID, time.Now().UTC()) {
+		if err := a.persistUserMonetizationLocked(ctx, userID); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{
+		"items":         a.listUserRoomItemsLocked(userID),
+		"customization": a.roomCustomizationLocked(userID),
+	}, nil
 }
 
 func (a *App) listUserRoomItemsLocked(userID string) []UserRoomItem {

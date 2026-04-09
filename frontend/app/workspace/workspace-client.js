@@ -7,15 +7,20 @@ import { useRouter } from "next/navigation";
 import { apiFetch, clearAuth, isUnauthorizedError, loadAuth, loadRegionId, subscribeAuth } from "@/lib/client";
 import { REGIONS } from "@/lib/preview-data";
 import {
+  ROOM_DEFAULT_FLOOR_STYLE,
   ROOM_DEFAULT_THEME_ID,
+  ROOM_DEFAULT_WALL_STYLE,
   ROOM_DEFAULT_WINDOW_SCENE_ID,
+  ROOM_FLOOR_STYLES,
   ROOM_SCENE_ORDER,
   ROOM_SCENE_SLOTS,
   ROOM_THEMES,
+  ROOM_WALL_STYLES,
   ROOM_WINDOW_SCENES,
   normalizeRoomLevel,
   normalizeRoomTheme,
   normalizeWindowScene,
+  resolveRoomCustomization,
 } from "@/lib/room-scene-config";
 
 const DEVELOPER_NAV_ITEMS = [
@@ -51,6 +56,8 @@ export default function WorkspaceClient() {
     candidates: [],
     leaderboard: [],
     monetization: null,
+    cosmetics: { catalog: [], owned: [], equipped: [] },
+    roomCustomization: { equipped: [] },
   });
   const [currentChallenge, setCurrentChallenge] = useState(null);
   const [activeFile, setActiveFile] = useState("");
@@ -60,12 +67,14 @@ export default function WorkspaceClient() {
   const [explanationResult, setExplanationResult] = useState(null);
   const [busyAction, setBusyAction] = useState("");
   const [selectedRoomCode, setSelectedRoomCode] = useState("");
+  const [visibleRoomPopoverCode, setVisibleRoomPopoverCode] = useState("");
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [selectedCandidateRoomCode, setSelectedCandidateRoomCode] = useState("");
+  const [visibleCandidateRoomPopoverCode, setVisibleCandidateRoomPopoverCode] = useState("");
   const [linkedInDraft, setLinkedInDraft] = useState("");
   const [profileNotice, setProfileNotice] = useState("");
+  const [customizationOpen, setCustomizationOpen] = useState(false);
   const roomThemeID = ROOM_DEFAULT_THEME_ID;
-  const windowSceneID = ROOM_DEFAULT_WINDOW_SCENE_ID;
 
   useEffect(() => {
     const auth = loadAuth();
@@ -101,6 +110,12 @@ export default function WorkspaceClient() {
   const candidates = data.candidates || [];
   const leaderboard = data.leaderboard || [];
   const monetization = data.monetization || null;
+  const cosmeticInventory = data.cosmetics || { catalog: [], owned: [], equipped: [] };
+  const roomCustomization = useMemo(
+    () => resolveRoomCustomization(data.roomCustomization?.equipped || cosmeticInventory.equipped || []),
+    [data.roomCustomization, cosmeticInventory.equipped],
+  );
+  const windowSceneID = roomCustomization.windowSceneID || ROOM_DEFAULT_WINDOW_SCENE_ID;
   const token = session?.auth?.access_token || "";
   const isHR = user.role === "hr";
   const allowedNav = useMemo(() => (isHR ? HR_NAV_ITEMS : DEVELOPER_NAV_ITEMS), [isHR]);
@@ -117,6 +132,10 @@ export default function WorkspaceClient() {
   const selectedRoomItem = orderedRoomItems.find((item) => item.room_item_code === selectedRoomCode) || orderedRoomItems[0] || null;
   const selectedRoomSlot = selectedRoomItem ? ROOM_SCENE_SLOTS[selectedRoomItem.room_item_code] : null;
   const candidateRoomItems = selectedCandidate?.room || [];
+  const candidateRoomCustomization = useMemo(
+    () => resolveRoomCustomization(selectedCandidate?.room_customization?.equipped || []),
+    [selectedCandidate],
+  );
   const orderedCandidateRoomItems = useMemo(
     () =>
       ROOM_SCENE_ORDER.map((code) => candidateRoomItems.find((item) => item.room_item_code === code)).filter(Boolean),
@@ -131,24 +150,50 @@ export default function WorkspaceClient() {
       if (selectedRoomCode) {
         setSelectedRoomCode("");
       }
+      if (visibleRoomPopoverCode) {
+        setVisibleRoomPopoverCode("");
+      }
       return;
     }
     if (!orderedRoomItems.some((item) => item.room_item_code === selectedRoomCode)) {
       setSelectedRoomCode(orderedRoomItems[0].room_item_code);
     }
-  }, [orderedRoomItems, selectedRoomCode]);
+  }, [orderedRoomItems, selectedRoomCode, visibleRoomPopoverCode]);
 
   useEffect(() => {
     if (orderedCandidateRoomItems.length === 0) {
       if (selectedCandidateRoomCode) {
         setSelectedCandidateRoomCode("");
       }
+      if (visibleCandidateRoomPopoverCode) {
+        setVisibleCandidateRoomPopoverCode("");
+      }
       return;
     }
     if (!orderedCandidateRoomItems.some((item) => item.room_item_code === selectedCandidateRoomCode)) {
       setSelectedCandidateRoomCode(orderedCandidateRoomItems[0].room_item_code);
     }
-  }, [orderedCandidateRoomItems, selectedCandidateRoomCode]);
+  }, [orderedCandidateRoomItems, selectedCandidateRoomCode, visibleCandidateRoomPopoverCode]);
+
+  useEffect(() => {
+    if (!visibleRoomPopoverCode) {
+      return undefined;
+    }
+    const timeoutID = window.setTimeout(() => {
+      setVisibleRoomPopoverCode((current) => (current === visibleRoomPopoverCode ? "" : current));
+    }, 7000);
+    return () => window.clearTimeout(timeoutID);
+  }, [visibleRoomPopoverCode]);
+
+  useEffect(() => {
+    if (!visibleCandidateRoomPopoverCode) {
+      return undefined;
+    }
+    const timeoutID = window.setTimeout(() => {
+      setVisibleCandidateRoomPopoverCode((current) => (current === visibleCandidateRoomPopoverCode ? "" : current));
+    }, 7000);
+    return () => window.clearTimeout(timeoutID);
+  }, [visibleCandidateRoomPopoverCode]);
 
   useEffect(() => {
     if (isHR) {
@@ -197,25 +242,31 @@ export default function WorkspaceClient() {
           candidates: candidatePayload.candidates || [],
           leaderboard: leaderboardPayload.rankings || [],
           monetization: candidatePayload.monetization || leaderboardPayload.monetization || null,
+          cosmetics: { catalog: [], owned: [], equipped: [] },
+          roomCustomization: { equipped: [] },
         });
       } else {
-        const [profilePayload, skillsPayload, roomPayload, templatesPayload, rankingPayload] = await Promise.all([
+        const [profilePayload, skillsPayload, roomPayload, templatesPayload, rankingPayload, monetizationPayload, cosmeticsPayload] = await Promise.all([
           apiFetch("/v1/profile", { token: currentSession.auth.access_token }),
           apiFetch("/v1/skills", { token: currentSession.auth.access_token }),
           apiFetch("/v1/room", { token: currentSession.auth.access_token }),
           apiFetch("/v1/challenges/templates", { token: currentSession.auth.access_token }),
           apiFetch("/v1/rankings/global", { token: currentSession.auth.access_token }),
+          apiFetch("/v1/monetization/summary", { token: currentSession.auth.access_token }),
+          fetchCosmeticInventory(currentSession.auth.access_token),
         ]);
         setData({
           user: me,
           profile: profilePayload,
           skills: skillsPayload.skills || [],
           room: roomPayload.items || [],
+          roomCustomization: roomPayload.customization || { equipped: [] },
           rankings: rankingPayload.rankings || [],
           templates: templatesPayload.templates || [],
           candidates: [],
           leaderboard: [],
-          monetization: null,
+          monetization: monetizationPayload || null,
+          cosmetics: cosmeticsPayload || { catalog: [], owned: [], equipped: [] },
         });
       }
       setSelectedCandidate(null);
@@ -253,6 +304,7 @@ export default function WorkspaceClient() {
       profile: profilePayload,
       skills: skillsPayload,
       room: roomPayload,
+      roomCustomization: current.roomCustomization,
       rankings: rankingPayload.rankings || [],
       candidates: nextCandidates,
       leaderboard: nextLeaderboard,
@@ -292,6 +344,7 @@ export default function WorkspaceClient() {
       const payload = await fetchCandidateDetail(token, userID);
       setSelectedCandidate(payload);
       setSelectedCandidateRoomCode("");
+      setVisibleCandidateRoomPopoverCode("");
       setData((current) => ({
         ...current,
         monetization: payload.monetization || current.monetization,
@@ -365,6 +418,7 @@ export default function WorkspaceClient() {
       const payload = await fetchCandidateDetail(token, userID);
       setSelectedCandidate(payload);
       setSelectedCandidateRoomCode("");
+      setVisibleCandidateRoomPopoverCode("");
       setData((current) => ({
         ...current,
         monetization: payload.monetization || current.monetization,
@@ -407,6 +461,44 @@ export default function WorkspaceClient() {
     } finally {
       setBusyAction("");
     }
+  }
+
+  async function handleEquipCosmetic(cosmeticCode) {
+    if (!token || isHR) {
+      return;
+    }
+    setBusyAction(`equip:${cosmeticCode}`);
+    setError("");
+    try {
+      const payload = await equipCosmetic(token, cosmeticCode);
+      setData((current) => ({
+        ...current,
+        cosmetics: payload,
+        roomCustomization: {
+          equipped: payload.equipped || [],
+        },
+      }));
+    } catch (cosmeticError) {
+      setError(cosmeticError instanceof Error ? cosmeticError.message : "Unable to equip cosmetic");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  function handleSelectRoomSlot(code) {
+    setSelectedRoomCode(code);
+    setVisibleRoomPopoverCode("");
+    window.setTimeout(() => {
+      setVisibleRoomPopoverCode(code);
+    }, 0);
+  }
+
+  function handleSelectCandidateRoomSlot(code) {
+    setSelectedCandidateRoomCode(code);
+    setVisibleCandidateRoomPopoverCode("");
+    window.setTimeout(() => {
+      setVisibleCandidateRoomPopoverCode(code);
+    }, 0);
   }
 
   async function handleStartChallenge(templateID) {
@@ -771,7 +863,13 @@ export default function WorkspaceClient() {
                     Open room
                   </button>
                 </div>
-                <RoomStage items={roomItems} compact themeID={roomThemeID} windowSceneID={windowSceneID} />
+                <RoomStage
+                  items={roomItems}
+                  compact
+                  themeID={roomThemeID}
+                  windowSceneID={windowSceneID}
+                  customization={roomCustomization}
+                />
               </div>
             </>
           )}
@@ -971,9 +1069,11 @@ export default function WorkspaceClient() {
             <RoomStage
               items={roomItems}
               selectedCode={selectedRoomCode}
-              onSelect={setSelectedRoomCode}
+              popoverCode={visibleRoomPopoverCode}
+              onSelect={handleSelectRoomSlot}
               themeID={roomThemeID}
               windowSceneID={windowSceneID}
+              customization={roomCustomization}
             />
           </div>
           <div className="card room-inspector">
@@ -981,8 +1081,18 @@ export default function WorkspaceClient() {
             <RoomInspector
               item={selectedRoomItem}
               slot={selectedRoomSlot}
-              onSelect={setSelectedRoomCode}
+              onSelect={handleSelectRoomSlot}
               items={orderedRoomItems}
+            />
+          </div>
+          <div className="card card--span-2">
+            <RoomCustomizationPanel
+              inventory={cosmeticInventory}
+              monetization={monetization}
+              onEquip={handleEquipCosmetic}
+              busyAction={busyAction}
+              open={customizationOpen}
+              onToggle={() => setCustomizationOpen((current) => !current)}
             />
           </div>
         </section>
@@ -1305,9 +1415,11 @@ export default function WorkspaceClient() {
                 <RoomStage
                   items={selectedCandidate.room || []}
                   selectedCode={selectedCandidateRoomCode}
-                  onSelect={setSelectedCandidateRoomCode}
+                  popoverCode={visibleCandidateRoomPopoverCode}
+                  onSelect={handleSelectCandidateRoomSlot}
                   themeID={roomThemeID}
-                  windowSceneID={windowSceneID}
+                  windowSceneID={candidateRoomCustomization.windowSceneID || ROOM_DEFAULT_WINDOW_SCENE_ID}
+                  customization={candidateRoomCustomization}
                 />
               </div>
               <div className="card room-inspector">
@@ -1315,7 +1427,7 @@ export default function WorkspaceClient() {
                 <RoomInspector
                   item={selectedCandidateRoomItem}
                   slot={selectedCandidateRoomSlot}
-                  onSelect={setSelectedCandidateRoomCode}
+                  onSelect={handleSelectCandidateRoomSlot}
                   items={orderedCandidateRoomItems}
                 />
               </div>
@@ -1388,6 +1500,10 @@ async function fetchCandidateDetail(token, userID) {
   return apiFetch(`/v1/hr/candidates/${userID}`, { token });
 }
 
+async function fetchCosmeticInventory(token) {
+  return apiFetch("/v1/dev/cosmetics/inventory", { token });
+}
+
 async function unlockCandidate(token, userID) {
   return apiFetch(`/v1/hr/candidates/${userID}/unlock`, {
     method: "POST",
@@ -1399,6 +1515,16 @@ async function inviteCandidate(token, userID) {
   return apiFetch(`/v1/hr/candidates/${userID}/invite`, {
     method: "POST",
     token,
+  });
+}
+
+async function equipCosmetic(token, cosmeticCode) {
+  return apiFetch("/v1/dev/cosmetics/equip", {
+    method: "POST",
+    token,
+    body: {
+      cosmetic_code: cosmeticCode,
+    },
   });
 }
 
@@ -1421,6 +1547,13 @@ function excerpt(value) {
     return "";
   }
   return String(value).replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function sanitizeClass(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function candidateAccessLabel(access) {
@@ -1673,21 +1806,40 @@ function classifyToken(value) {
   return "function";
 }
 
-function RoomStage({ items, compact = false, selectedCode = "", onSelect, themeID = ROOM_DEFAULT_THEME_ID, windowSceneID = ROOM_DEFAULT_WINDOW_SCENE_ID }) {
+function RoomStage({
+  items,
+  compact = false,
+  selectedCode = "",
+  popoverCode = "",
+  onSelect,
+  themeID = ROOM_DEFAULT_THEME_ID,
+  windowSceneID = ROOM_DEFAULT_WINDOW_SCENE_ID,
+  customization,
+}) {
   const indexed = {};
   for (const item of items || []) {
     indexed[item.room_item_code] = item;
   }
   const interactive = typeof onSelect === "function" && !compact;
   const theme = ROOM_THEMES[normalizeRoomTheme(themeID)];
-  const windowScene = ROOM_WINDOW_SCENES[normalizeWindowScene(windowSceneID)];
+  const appearance = customization || resolveRoomCustomization([]);
+  const windowScene = ROOM_WINDOW_SCENES[normalizeWindowScene(appearance.windowSceneID || windowSceneID)];
+  const wallClassName = appearance.wallStyle?.className || ROOM_WALL_STYLES[ROOM_DEFAULT_WALL_STYLE].className;
+  const floorClassName = appearance.floorStyle?.className || ROOM_FLOOR_STYLES[ROOM_DEFAULT_FLOOR_STYLE].className;
 
   return (
     <div className={compact ? `room-stage room-stage--compact room-stage--${theme.id}` : `room-stage room-stage--${theme.id}`}>
       <div className="room-stage__canvas">
         <img className="room-stage__window-scene" src={windowScene.asset} alt="" aria-hidden="true" />
+        <div className={`room-stage__wall-tint ${wallClassName}`} aria-hidden="true" />
+        <div className={`room-stage__floor-tint ${floorClassName}`} aria-hidden="true" />
         <img className="room-stage__shell" src={theme.shellAsset} alt="" aria-hidden="true" />
         {theme.overlayAsset ? <img className="room-stage__theme-overlay" src={theme.overlayAsset} alt="" aria-hidden="true" /> : null}
+        {(appearance.decor || []).map((decor) => (
+          <div key={decor.code} className="room-decor" style={decor.style} aria-hidden="true">
+            <div className={`room-decor__asset ${decor.className || ""}`} />
+          </div>
+        ))}
         {ROOM_SCENE_ORDER.map((code) => (
           <RoomSlot
             key={code}
@@ -1695,6 +1847,7 @@ function RoomStage({ items, compact = false, selectedCode = "", onSelect, themeI
             item={indexed[code]}
             interactive={interactive}
             selected={selectedCode === code}
+            popoverVisible={popoverCode === code}
             onSelect={onSelect}
           />
         ))}
@@ -1703,7 +1856,7 @@ function RoomStage({ items, compact = false, selectedCode = "", onSelect, themeI
   );
 }
 
-function RoomSlot({ slot, item, interactive, selected, onSelect }) {
+function RoomSlot({ slot, item, interactive, selected, popoverVisible, onSelect }) {
   const level = normalizeRoomLevel(item?.current_level);
   const presentationMode = roomPresentationMode(slot, item);
   const showLevelBadge = slot.showLevelBadge !== false && presentationMode !== "achievement_case";
@@ -1730,10 +1883,10 @@ function RoomSlot({ slot, item, interactive, selected, onSelect }) {
         ) : (
           <div className={`room-slot__placeholder room-slot__placeholder--${slot.code}`}>
             <div className="room-slot__silhouette" />
-            {showLevelBadge ? <span className={`room-slot__level-badge room-slot__level-badge--${level}`}>{level}</span> : null}
           </div>
         )}
-        {selected ? <RoomSlotPopover slot={slot} item={item} /> : null}
+        {showLevelBadge ? <span className={`room-slot__level-badge room-slot__level-badge--${level}`}>{level}</span> : null}
+        {popoverVisible ? <RoomSlotPopover slot={slot} item={item} /> : null}
       </button>
     </div>
   );
@@ -1744,7 +1897,7 @@ function RoomSlotPopover({ slot, item }) {
   const explanation = excerpt(readState(item).explanation || "");
   const achievements = roomAchievementEntries(item).slice(0, 3);
   return (
-    <div className="room-slot__popover">
+    <div className={`room-slot__popover room-slot__popover--${slot.code}`}>
       <p className="room-slot__popover-skill">{slot.skill}</p>
       <strong>{slot.title}</strong>
       <span className="room-slot__popover-meta">{roomMetaLabel(slot, item)}</span>
@@ -1853,6 +2006,94 @@ function RoomInspector({
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+function RoomCustomizationPanel({ inventory, monetization, onEquip, busyAction, open, onToggle }) {
+  const catalog = inventory?.catalog || [];
+  const owned = new Set((inventory?.owned || []).map((item) => item.cosmetic_code));
+  const equipped = Object.fromEntries((inventory?.equipped || []).map((item) => [item.slot_code, item.cosmetic_code]));
+  const premiumEnabled = Boolean(monetization?.entitlements?.premium_cosmetics);
+  const categories = [
+    { key: "window_scene", label: "Window", subtitle: "Change the scene behind the window." },
+    { key: "wall_style", label: "Walls", subtitle: "Swap the room wall finish without touching skill items." },
+    { key: "floor_style", label: "Floor", subtitle: "Change the floor treatment for the room shell." },
+    { key: "decor", label: "Decor", subtitle: "Add optional decorative props. These never affect trust or score." },
+  ];
+
+  return (
+    <div className="room-customization">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Customize room</p>
+          <h3>Visual-only cosmetics</h3>
+        </div>
+        <div className="room-customization__header-actions">
+          <span className="meta-pill">{labelize(monetization?.plan?.name || "developer free")}</span>
+          <button type="button" className="secondary-button" onClick={onToggle}>
+            {open ? "Hide customization" : "Open customization"}
+          </button>
+        </div>
+      </div>
+      <p className="muted-copy room-customization__intro">
+        Cosmetics only affect the visual shell. Skill items, score, confidence, and ranking stay unchanged.
+      </p>
+
+      {open ? (
+        categories.map((category) => {
+          const items = catalog.filter((item) => item.category === category.key);
+          if (items.length === 0) {
+            return null;
+          }
+          return (
+            <section key={category.key} className="room-customization__section">
+              <div className="room-customization__section-head">
+                <div>
+                  <p className="eyebrow">{category.label}</p>
+                  <h4>{category.subtitle}</h4>
+                </div>
+              </div>
+              <div className="room-customization__grid">
+                {items.map((item) => {
+                  const isOwned = owned.has(item.code);
+                  const isEquipped = equipped[item.slot_code] === item.code;
+                  const isLocked = !isOwned;
+                  const actionBusy = busyAction === `equip:${item.code}`;
+                  const buttonLabel = isEquipped ? "Equipped" : isLocked ? "Developer Plus" : "Equip";
+                  return (
+                    <div key={item.code} className={isEquipped ? "cosmetic-card cosmetic-card--active" : "cosmetic-card"}>
+                      <div className={`cosmetic-card__preview cosmetic-card__preview--${sanitizeClass(item.code)}`}>
+                        <span>{item.category.replaceAll("_", " ")}</span>
+                      </div>
+                      <div className="cosmetic-card__body">
+                        <div className="cosmetic-card__meta">
+                          <strong>{item.name}</strong>
+                          <span className={item.premium ? "meta-pill meta-pill--premium" : "meta-pill"}>{item.premium ? "Plus" : "Included"}</span>
+                        </div>
+                        <p>{item.description}</p>
+                        {isLocked && !premiumEnabled ? <p className="muted-copy">Upgrade to Developer Plus to unlock this cosmetic.</p> : null}
+                        <button
+                          type="button"
+                          className={isEquipped ? "secondary-button" : "primary-button"}
+                          onClick={() => onEquip(item.code)}
+                          disabled={isEquipped || isLocked || actionBusy}
+                        >
+                          {actionBusy ? "Saving..." : buttonLabel}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })
+      ) : (
+        <div className="room-customization__collapsed">
+          <p className="muted-copy">Customization is hidden by default. Open it when you want to switch the room shell, window scene, or decor.</p>
+        </div>
+      )}
     </div>
   );
 }

@@ -43,9 +43,9 @@ The current MVP ships the monetization architecture layer without billing integr
 - default role-based plans for developers and recruiters
 - persisted subscriptions and entitlement snapshots
 - AI usage metering for developer hints/explanations and HR-side AI actions
-- developer cosmetic catalog, ownership, and equipped state for room customization
+- developer cosmetic catalog, ownership, equipped state, and plan-gated room customization
 
-HR candidate unlock flow and developer cosmetic purchases are intentionally deferred to later product sprints.
+HR candidate unlock flow is active. Billing and paid developer cosmetic purchases are intentionally deferred to later product sprints.
 
 ## Local stack
 

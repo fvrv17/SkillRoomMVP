@@ -10,6 +10,7 @@ servers:
 tags:
   - name: Auth
   - name: Profile
+  - name: Monetization
   - name: Challenges
   - name: AI
   - name: Social
@@ -205,6 +206,14 @@ paths:
                         - code: percentile_top_10
                           title: Top 10% globally
                           description: Reached the global top 10 percent of candidates.
+                customization:
+                  equipped:
+                    - slot_code: window_scene
+                      cosmetic_code: window_daylight_default
+                    - slot_code: wall_style
+                      cosmetic_code: wall_cream_default
+                    - slot_code: floor_style
+                      cosmetic_code: floor_oak_default
         '401':
           $ref: '#/components/responses/ErrorResponse'
   /v1/monetization/summary:
@@ -260,6 +269,33 @@ paths:
         '401':
           $ref: '#/components/responses/ErrorResponse'
         '403':
+          $ref: '#/components/responses/ErrorResponse'
+  /v1/dev/cosmetics/equip:
+    post:
+      tags: [Monetization]
+      security:
+        - BearerAuth: []
+      summary: Equip a developer room cosmetic into its slot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EquipCosmeticRequest'
+            example:
+              cosmetic_code: window_sunset_default
+      responses:
+        '200':
+          description: Updated cosmetic inventory with the selected item equipped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CosmeticInventoryResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/ErrorResponse'
+        '404':
           $ref: '#/components/responses/ErrorResponse'
   /v1/challenges/templates:
     get:
@@ -1386,6 +1422,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RoomItemView'
+        customization:
+          $ref: '#/components/schemas/RoomCustomizationState'
     SubmissionResponse:
       type: object
       properties:
@@ -1708,6 +1746,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/UserRoomItem'
+        room_customization:
+          $ref: '#/components/schemas/RoomCustomizationState'
         recent_submissions:
           type: array
           items:
@@ -1884,6 +1924,19 @@ components:
         updated_at:
           type: string
           format: date-time
+    RoomCustomizationState:
+      type: object
+      properties:
+        equipped:
+          type: array
+          items:
+            $ref: '#/components/schemas/EquippedCosmetic'
+    EquipCosmeticRequest:
+      type: object
+      required: [cosmetic_code]
+      properties:
+        cosmetic_code:
+          type: string
     CosmeticInventoryResponse:
       type: object
       properties:

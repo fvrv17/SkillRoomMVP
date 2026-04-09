@@ -404,6 +404,7 @@ type CandidateDetailView struct {
 	Profile           *UserProfile                 `json:"profile,omitempty"`
 	Skills            []UserSkill                  `json:"skills,omitempty"`
 	Room              []UserRoomItem               `json:"room,omitempty"`
+	RoomCustomization RoomCustomizationState       `json:"room_customization,omitempty"`
 	RecentSubmissions []CandidateSubmissionSummary `json:"recent_submissions,omitempty"`
 	LockedFields      []string                     `json:"locked_fields,omitempty"`
 	Monetization      MonetizationSummary          `json:"monetization"`

@@ -103,6 +103,10 @@ type EquippedCosmetic struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type RoomCustomizationState struct {
+	Equipped []EquippedCosmetic `json:"equipped"`
+}
+
 type MonetizationUsage struct {
 	PeriodStart           time.Time `json:"period_start"`
 	PeriodEnd             time.Time `json:"period_end"`

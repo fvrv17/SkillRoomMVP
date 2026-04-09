@@ -20,6 +20,11 @@ const (
 	planCodeInternalAdmin = "internal_admin"
 )
 
+var (
+	errCosmeticNotFound  = errors.New("cosmetic not found")
+	errCosmeticForbidden = errors.New("cosmetic is unavailable for the current plan")
+)
+
 func (a *App) handleMonetizationSummary(w http.ResponseWriter, r *http.Request) {
 	user, err := a.authenticatedUser(r)
 	if err != nil {
@@ -55,9 +60,41 @@ func (a *App) handleCosmeticInventory(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "developer room cosmetics are unavailable for this role")
 		return
 	}
-	a.mu.RLock()
-	inventory := a.cosmeticInventoryLocked(user.ID)
-	a.mu.RUnlock()
+	inventory, err := a.cosmeticInventory(r.Context(), user.ID)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, inventory)
+}
+
+func (a *App) handleEquipCosmetic(w http.ResponseWriter, r *http.Request) {
+	user, err := a.authenticatedUser(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	if !roleSupportsDeveloperRoom(user.Role) {
+		httpx.WriteError(w, http.StatusForbidden, "developer room cosmetics are unavailable for this role")
+		return
+	}
+	var req EquipCosmeticRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	inventory, err := a.equipCosmetic(r.Context(), user.ID, req.CosmeticCode)
+	if err != nil {
+		status := http.StatusBadRequest
+		switch {
+		case errors.Is(err, errCosmeticNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, errCosmeticForbidden):
+			status = http.StatusForbidden
+		}
+		httpx.WriteError(w, status, err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, inventory)
 }
 
@@ -218,6 +255,32 @@ func defaultCosmeticCatalog() []CosmeticCatalogItem {
 			Active:      true,
 		},
 		{
+			ID:          "cos_window_sunset",
+			Code:        "window_sunset_default",
+			Name:        "Sunset Window",
+			Category:    "window_scene",
+			SlotCode:    "window_scene",
+			Description: "Warm sunset view for the studio window.",
+			Audience:    "developer",
+			Rarity:      "common",
+			Premium:     false,
+			AssetRef:    "window/sunset",
+			Active:      true,
+		},
+		{
+			ID:          "cos_window_night",
+			Code:        "window_night_plus",
+			Name:        "Night Window",
+			Category:    "window_scene",
+			SlotCode:    "window_scene",
+			Description: "Premium night skyline scene for the studio window.",
+			Audience:    "developer",
+			Rarity:      "rare",
+			Premium:     true,
+			AssetRef:    "window/night",
+			Active:      true,
+		},
+		{
 			ID:          "cos_wall_cream",
 			Code:        "wall_cream_default",
 			Name:        "Studio Cream Walls",
@@ -231,6 +294,32 @@ func defaultCosmeticCatalog() []CosmeticCatalogItem {
 			Active:      true,
 		},
 		{
+			ID:          "cos_wall_sand",
+			Code:        "wall_sand_default",
+			Name:        "Soft Sand Walls",
+			Category:    "wall_style",
+			SlotCode:    "wall_style",
+			Description: "Warm sand wall finish for a softer studio tone.",
+			Audience:    "developer",
+			Rarity:      "common",
+			Premium:     false,
+			AssetRef:    "walls/sand",
+			Active:      true,
+		},
+		{
+			ID:          "cos_wall_graphite",
+			Code:        "wall_graphite_plus",
+			Name:        "Graphite Walls",
+			Category:    "wall_style",
+			SlotCode:    "wall_style",
+			Description: "Premium charcoal wall finish for a sharper look.",
+			Audience:    "developer",
+			Rarity:      "rare",
+			Premium:     true,
+			AssetRef:    "walls/graphite",
+			Active:      true,
+		},
+		{
 			ID:          "cos_floor_oak",
 			Code:        "floor_oak_default",
 			Name:        "Light Oak Floor",
@@ -241,6 +330,32 @@ func defaultCosmeticCatalog() []CosmeticCatalogItem {
 			Rarity:      "common",
 			Premium:     false,
 			AssetRef:    "floors/oak-light",
+			Active:      true,
+		},
+		{
+			ID:          "cos_floor_honey",
+			Code:        "floor_honey_default",
+			Name:        "Honey Oak Floor",
+			Category:    "floor_style",
+			SlotCode:    "floor_style",
+			Description: "A warmer oak finish for the room floor.",
+			Audience:    "developer",
+			Rarity:      "common",
+			Premium:     false,
+			AssetRef:    "floors/oak-honey",
+			Active:      true,
+		},
+		{
+			ID:          "cos_floor_charcoal",
+			Code:        "floor_charcoal_plus",
+			Name:        "Charcoal Floor",
+			Category:    "floor_style",
+			SlotCode:    "floor_style",
+			Description: "Premium dark floor treatment for the room shell.",
+			Audience:    "developer",
+			Rarity:      "rare",
+			Premium:     true,
+			AssetRef:    "floors/charcoal",
 			Active:      true,
 		},
 		{
@@ -313,30 +428,7 @@ func (a *App) initUserMonetizationLocked(userID string, role Role, now time.Time
 	if _, ok := a.equippedCosmetics[userID]; !ok {
 		a.equippedCosmetics[userID] = map[string]EquippedCosmetic{}
 	}
-	for slotCode, cosmeticCode := range defaultEquippedCosmetics() {
-		if _, owned := a.userCosmetics[userID][cosmeticCode]; !owned {
-			cosmetic, ok := a.cosmeticCatalog[cosmeticCode]
-			if !ok {
-				continue
-			}
-			a.userCosmetics[userID][cosmeticCode] = UserCosmetic{
-				ID:           id.New("uco"),
-				UserID:       userID,
-				CosmeticID:   cosmetic.ID,
-				CosmeticCode: cosmetic.Code,
-				Source:       "default_grant",
-				OwnedAt:      now,
-			}
-		}
-		if _, equipped := a.equippedCosmetics[userID][slotCode]; !equipped {
-			a.equippedCosmetics[userID][slotCode] = EquippedCosmetic{
-				UserID:       userID,
-				SlotCode:     slotCode,
-				CosmeticCode: cosmeticCode,
-				UpdatedAt:    now,
-			}
-		}
-	}
+	a.syncDeveloperCosmeticsLocked(userID, now)
 }
 
 func (a *App) normalizeUserMonetizationLocked(userID string, role Role, fallbackTime time.Time) {
@@ -364,6 +456,9 @@ func (a *App) normalizeUserMonetizationLocked(userID string, role Role, fallback
 		subscription.UpdatedAt = fallbackTime
 	}
 	a.subscriptions[userID] = subscription
+	if roleSupportsDeveloperRoom(role) {
+		a.syncDeveloperCosmeticsLocked(userID, fallbackTime)
+	}
 }
 
 func defaultEquippedCosmetics() map[string]string {
@@ -372,6 +467,97 @@ func defaultEquippedCosmetics() map[string]string {
 		"wall_style":   "wall_cream_default",
 		"floor_style":  "floor_oak_default",
 	}
+}
+
+func (a *App) syncDeveloperCosmeticsLocked(userID string, now time.Time) bool {
+	if _, ok := a.userCosmetics[userID]; !ok {
+		a.userCosmetics[userID] = map[string]UserCosmetic{}
+	}
+	if _, ok := a.equippedCosmetics[userID]; !ok {
+		a.equippedCosmetics[userID] = map[string]EquippedCosmetic{}
+	}
+
+	changed := false
+	subscription, ok := a.subscriptions[userID]
+	if !ok {
+		return false
+	}
+	plan := a.planForSubscriptionLocked(subscription)
+	for _, cosmetic := range a.listCosmeticCatalogLocked() {
+		if cosmetic.Audience != "developer" {
+			continue
+		}
+		if cosmetic.Premium && !plan.Entitlements.PremiumCosmetics {
+			continue
+		}
+		if _, owned := a.userCosmetics[userID][cosmetic.Code]; owned {
+			continue
+		}
+		source := "default_grant"
+		if cosmetic.Premium {
+			source = "plan_entitlement"
+		}
+		a.userCosmetics[userID][cosmetic.Code] = UserCosmetic{
+			ID:           id.New("uco"),
+			UserID:       userID,
+			CosmeticID:   cosmetic.ID,
+			CosmeticCode: cosmetic.Code,
+			Source:       source,
+			OwnedAt:      now,
+		}
+		changed = true
+	}
+
+	for slotCode, defaultCode := range defaultEquippedCosmetics() {
+		equipped, ok := a.equippedCosmetics[userID][slotCode]
+		if !ok || equipped.CosmeticCode == "" || !a.canUseCosmeticLocked(userID, equipped.CosmeticCode) {
+			a.equippedCosmetics[userID][slotCode] = EquippedCosmetic{
+				UserID:       userID,
+				SlotCode:     slotCode,
+				CosmeticCode: defaultCode,
+				UpdatedAt:    now,
+			}
+			changed = true
+		}
+	}
+
+	for slotCode, equipped := range a.equippedCosmetics[userID] {
+		if a.canUseCosmeticLocked(userID, equipped.CosmeticCode) {
+			continue
+		}
+		if defaultCode, ok := defaultEquippedCosmetics()[slotCode]; ok {
+			a.equippedCosmetics[userID][slotCode] = EquippedCosmetic{
+				UserID:       userID,
+				SlotCode:     slotCode,
+				CosmeticCode: defaultCode,
+				UpdatedAt:    now,
+			}
+		} else {
+			delete(a.equippedCosmetics[userID], slotCode)
+		}
+		changed = true
+	}
+
+	return changed
+}
+
+func (a *App) canUseCosmeticLocked(userID, cosmeticCode string) bool {
+	cosmetic, ok := a.cosmeticCatalog[cosmeticCode]
+	if !ok || !cosmetic.Active {
+		return false
+	}
+	if _, owned := a.userCosmetics[userID][cosmeticCode]; !owned {
+		return false
+	}
+	if !cosmetic.Premium {
+		return true
+	}
+	subscription, ok := a.subscriptions[userID]
+	if !ok {
+		return false
+	}
+	plan := a.planForSubscriptionLocked(subscription)
+	return plan.Entitlements.PremiumCosmetics
 }
 
 func defaultPlanCodeForRole(role Role) string {
@@ -489,6 +675,78 @@ func (a *App) cosmeticInventoryLocked(userID string) CosmeticInventoryResponse {
 	}
 }
 
+func (a *App) cosmeticInventory(ctx context.Context, userID string) (CosmeticInventoryResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	user, ok := a.users[userID]
+	if !ok {
+		return CosmeticInventoryResponse{}, errors.New("user not found")
+	}
+	if roleSupportsDeveloperRoom(user.Role) && a.syncDeveloperCosmeticsLocked(userID, time.Now().UTC()) {
+		if err := a.persistUserMonetizationLocked(ctx, userID); err != nil {
+			return CosmeticInventoryResponse{}, err
+		}
+	}
+	return a.cosmeticInventoryLocked(userID), nil
+}
+
+func (a *App) listEquippedCosmeticsLocked(userID string) []EquippedCosmetic {
+	equippedMap := a.equippedCosmetics[userID]
+	equipped := make([]EquippedCosmetic, 0, len(equippedMap))
+	for _, item := range equippedMap {
+		equipped = append(equipped, item)
+	}
+	sort.Slice(equipped, func(i, j int) bool {
+		return equipped[i].SlotCode < equipped[j].SlotCode
+	})
+	return equipped
+}
+
+func (a *App) roomCustomizationLocked(userID string) RoomCustomizationState {
+	return RoomCustomizationState{
+		Equipped: a.listEquippedCosmeticsLocked(userID),
+	}
+}
+
+func (a *App) equipCosmetic(ctx context.Context, userID, cosmeticCode string) (CosmeticInventoryResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	user, ok := a.users[userID]
+	if !ok {
+		return CosmeticInventoryResponse{}, errors.New("user not found")
+	}
+	if !roleSupportsDeveloperRoom(user.Role) {
+		return CosmeticInventoryResponse{}, errCosmeticForbidden
+	}
+	now := time.Now().UTC()
+	dirty := a.syncDeveloperCosmeticsLocked(userID, now)
+	cosmetic, ok := a.cosmeticCatalog[cosmeticCode]
+	if !ok || !cosmetic.Active || cosmetic.Audience != "developer" {
+		return CosmeticInventoryResponse{}, errCosmeticNotFound
+	}
+	if !a.canUseCosmeticLocked(userID, cosmeticCode) {
+		return CosmeticInventoryResponse{}, errCosmeticForbidden
+	}
+	if _, ok := a.equippedCosmetics[userID]; !ok {
+		a.equippedCosmetics[userID] = map[string]EquippedCosmetic{}
+	}
+	a.equippedCosmetics[userID][cosmetic.SlotCode] = EquippedCosmetic{
+		UserID:       userID,
+		SlotCode:     cosmetic.SlotCode,
+		CosmeticCode: cosmetic.Code,
+		UpdatedAt:    now,
+	}
+	dirty = true
+	if dirty {
+		if err := a.persistUserMonetizationLocked(ctx, userID); err != nil {
+			return CosmeticInventoryResponse{}, err
+		}
+	}
+	return a.cosmeticInventoryLocked(userID), nil
+}
+
 func (a *App) recordAIUsage(ctx context.Context, event AIUsageEvent) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -539,6 +797,7 @@ func (a *App) candidateDetail(ctx context.Context, recruiterUserID, candidateUse
 	detail.Profile = &profileCopy
 	detail.Skills = a.listUserSkillsLocked(candidate.ID)
 	detail.Room = a.listUserRoomItemsLocked(candidate.ID)
+	detail.RoomCustomization = a.roomCustomizationLocked(candidate.ID)
 	detail.RecentSubmissions = a.candidateRecentSubmissionsLocked(candidate.ID)
 	detail.LockedFields = nil
 	return detail, nil
@@ -656,6 +915,7 @@ func (a *App) candidateDetailLocked(recruiterUserID string, candidate User, mone
 	detail.Profile = &profile
 	detail.Skills = a.listUserSkillsLocked(candidate.ID)
 	detail.Room = a.listUserRoomItemsLocked(candidate.ID)
+	detail.RoomCustomization = a.roomCustomizationLocked(candidate.ID)
 	detail.RecentSubmissions = a.candidateRecentSubmissionsLocked(candidate.ID)
 	return detail
 }
