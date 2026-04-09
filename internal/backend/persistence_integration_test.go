@@ -169,6 +169,112 @@ func TestPersistentAppRestoresStateAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestPersistentAppUsesSQLBackedRankingsAndCandidateSearch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres-backed integration test in short mode")
+	}
+
+	dockerBinary := requireDockerDaemon(t)
+	postgresContainer := startDockerContainer(t, dockerBinary,
+		"postgres:16-alpine",
+		"-e", "POSTGRES_DB=mvp",
+		"-e", "POSTGRES_USER=postgres",
+		"-e", "POSTGRES_PASSWORD=postgres",
+		"-P",
+	)
+	postgresPort := dockerMappedPort(t, dockerBinary, postgresContainer, "5432/tcp")
+	dsn := fmt.Sprintf("postgres://postgres:postgres@127.0.0.1:%s/mvp?sslmode=disable", postgresPort)
+	waitFor(t, 30*time.Second, func() error {
+		store, err := OpenSQLStore(context.Background(), dsn)
+		if err != nil {
+			return err
+		}
+		return store.Close()
+	})
+
+	app := newPersistentTestApp(t, dsn)
+	router := app.Router()
+
+	topCandidate := registerAndCaptureAuth(t, router, RegisterRequest{
+		Email:    "sql-rank-top@example.com",
+		Username: "sql-rank-top",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleUser,
+	})
+	otherCandidate := registerAndCaptureAuth(t, router, RegisterRequest{
+		Email:    "sql-rank-low@example.com",
+		Username: "sql-rank-low",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleUser,
+	})
+	hrAuth := registerAndCaptureAuth(t, router, RegisterRequest{
+		Email:    "sql-rank-hr@example.com",
+		Username: "sql-rank-hr",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleHR,
+	})
+
+	submitSolvedChallenge(t, router, topCandidate.AccessToken, "react_feature_search", searchSolutionCode(), []TelemetryEventRequest{
+		{EventType: "input", OffsetSeconds: 8},
+		{EventType: "snapshot", OffsetSeconds: 26},
+	})
+
+	globalResp := performJSON(t, router, http.MethodGet, "/v1/rankings/global", nil, topCandidate.AccessToken)
+	if globalResp.Code != http.StatusOK {
+		t.Fatalf("global ranking status: %d", globalResp.Code)
+	}
+	var globalRankings map[string][]RankingEntry
+	if err := json.NewDecoder(globalResp.Body).Decode(&globalRankings); err != nil {
+		t.Fatalf("decode global rankings: %v", err)
+	}
+	if len(globalRankings["rankings"]) < 2 {
+		t.Fatalf("expected at least 2 ranking entries, got %d", len(globalRankings["rankings"]))
+	}
+	if globalRankings["rankings"][0].Username != "sql-rank-top" {
+		t.Fatalf("expected solved user to lead rankings, got %s", globalRankings["rankings"][0].Username)
+	}
+
+	searchResp := performJSON(t, router, http.MethodGet, "/v1/hr/candidates?min_score=1", nil, hrAuth.AccessToken)
+	if searchResp.Code != http.StatusOK {
+		t.Fatalf("hr search status: %d", searchResp.Code)
+	}
+	var searchPayload struct {
+		Candidates []CandidateView `json:"candidates"`
+	}
+	if err := json.NewDecoder(searchResp.Body).Decode(&searchPayload); err != nil {
+		t.Fatalf("decode hr candidates: %v", err)
+	}
+	if len(searchPayload.Candidates) != 1 {
+		t.Fatalf("expected 1 filtered candidate, got %d", len(searchPayload.Candidates))
+	}
+	if searchPayload.Candidates[0].Username != "sql-rank-top" {
+		t.Fatalf("expected top candidate in filtered search, got %s", searchPayload.Candidates[0].Username)
+	}
+
+	leaderboardResp := performJSON(t, router, http.MethodGet, "/v1/hr/leaderboard", nil, hrAuth.AccessToken)
+	if leaderboardResp.Code != http.StatusOK {
+		t.Fatalf("hr leaderboard status: %d", leaderboardResp.Code)
+	}
+	var leaderboardPayload struct {
+		Rankings []CandidateView `json:"rankings"`
+	}
+	if err := json.NewDecoder(leaderboardResp.Body).Decode(&leaderboardPayload); err != nil {
+		t.Fatalf("decode hr leaderboard: %v", err)
+	}
+	if len(leaderboardPayload.Rankings) < 2 {
+		t.Fatalf("expected at least 2 HR leaderboard entries, got %d", len(leaderboardPayload.Rankings))
+	}
+	if leaderboardPayload.Rankings[0].UserID != searchPayload.Candidates[0].UserID {
+		t.Fatalf("expected leaderboard and search to agree on top candidate")
+	}
+	if leaderboardPayload.Rankings[1].UserID != otherCandidate.User.ID {
+		t.Fatalf("expected second candidate to remain in leaderboard ordering")
+	}
+}
+
 func TestRedisOpsStoreExercisesCacheAndRateLimit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Redis-backed integration test in short mode")

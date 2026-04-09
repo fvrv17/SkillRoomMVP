@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -18,6 +19,13 @@ var schemaSQL string
 
 type SQLStore struct {
 	db *sql.DB
+}
+
+type CandidateSearchFilters struct {
+	MinScore      float64
+	MinConfidence float64
+	TopPercent    float64
+	ActiveDays    int
 }
 
 func OpenSQLStore(ctx context.Context, dsn string) (*SQLStore, error) {
@@ -680,6 +688,219 @@ func (s *SQLStore) UpsertRankingSnapshot(ctx context.Context, rankingType, count
 			data_json = EXCLUDED.data_json
 	`, id, rankingType, country, scopeUserID, date, dataJSON)
 	return err
+}
+
+func (s *SQLStore) QueryRankingEntries(ctx context.Context, kind, country, userID string, now time.Time) ([]RankingEntry, error) {
+	scopeWhere := "u.role = 'user'"
+	args := []any{now}
+	switch kind {
+	case "country":
+		args = append(args, country)
+		scopeWhere += fmt.Sprintf(" AND u.country = $%d", len(args))
+	case "friends":
+		args = append(args, userID)
+		scopeWhere += fmt.Sprintf(" AND (u.id = $%d OR EXISTS (SELECT 1 FROM friendships f WHERE f.user_id = $%d AND f.friend_user_id = u.id AND f.status = 'accepted'))", len(args), len(args))
+	}
+
+	query := fmt.Sprintf(`
+		WITH scored AS (
+			SELECT
+				u.id AS user_id,
+				u.username,
+				u.country,
+				u.last_active_at,
+				COALESCE(p.confidence_score, 50) AS confidence_score,
+				COALESCE(p.completed_challenges, 0) AS completed_challenges,
+				ROUND(
+					LEAST(
+						1000.0,
+						GREATEST(
+							0.0,
+							(
+								COALESCE(MAX(CASE WHEN us.skill_code = 'react' THEN us.score END), 0) * 0.45 +
+								COALESCE(MAX(CASE WHEN us.skill_code = 'javascript' THEN us.score END), 0) * 0.20 +
+								COALESCE(MAX(CASE WHEN us.skill_code = 'performance' THEN us.score END), 0) * 0.15 +
+								COALESCE(MAX(CASE WHEN us.skill_code = 'architecture' THEN us.score END), 0) * 0.10 +
+								COALESCE(MAX(CASE WHEN us.skill_code = 'consistency' THEN us.score END), 0) * 0.10
+							) * CASE
+								WHEN u.last_active_at IS NULL OR $1::timestamptz <= u.last_active_at OR $1::timestamptz - u.last_active_at <= INTERVAL '21 days' THEN 1.0
+								ELSE POWER(0.99::double precision, GREATEST(EXTRACT(EPOCH FROM ($1::timestamptz - u.last_active_at)) / 86400.0 - 21.0, 0.0))
+							END
+						)
+					)::numeric,
+					2
+				) AS current_skill_score
+			FROM users u
+			LEFT JOIN user_profiles p ON p.user_id = u.id
+			LEFT JOIN user_skills us ON us.user_id = u.id
+			WHERE %s
+			GROUP BY u.id, u.username, u.country, u.last_active_at, p.confidence_score, p.completed_challenges
+		),
+		ranked AS (
+			SELECT
+				user_id,
+				username,
+				country,
+				current_skill_score,
+				confidence_score,
+				last_active_at,
+				completed_challenges,
+				ROW_NUMBER() OVER (ORDER BY current_skill_score DESC, confidence_score DESC, last_active_at DESC, username ASC) AS rank,
+				COUNT(*) OVER () AS total_count
+			FROM scored
+		)
+		SELECT
+			user_id,
+			username,
+			country,
+			current_skill_score,
+			confidence_score,
+			CASE
+				WHEN total_count <= 1 THEN 100.0
+				ELSE ROUND((((total_count - rank)::numeric) / ((total_count - 1)::numeric)) * 100.0, 2)
+			END AS percentile,
+			rank,
+			last_active_at,
+			completed_challenges
+		FROM ranked
+		ORDER BY rank
+	`, scopeWhere)
+
+	return s.queryRankingEntries(ctx, query, args...)
+}
+
+func (s *SQLStore) SearchCandidateEntries(ctx context.Context, filters CandidateSearchFilters, now time.Time) ([]RankingEntry, error) {
+	args := []any{now}
+	conditions := make([]string, 0, 4)
+	if filters.MinScore > 0 {
+		args = append(args, filters.MinScore)
+		conditions = append(conditions, fmt.Sprintf("current_skill_score >= $%d", len(args)))
+	}
+	if filters.MinConfidence > 0 {
+		args = append(args, filters.MinConfidence)
+		conditions = append(conditions, fmt.Sprintf("confidence_score >= $%d", len(args)))
+	}
+	if filters.TopPercent > 0 {
+		args = append(args, 100-filters.TopPercent)
+		conditions = append(conditions, fmt.Sprintf("percentile >= $%d", len(args)))
+	}
+	if filters.ActiveDays > 0 {
+		args = append(args, now.Add(-time.Duration(filters.ActiveDays)*24*time.Hour))
+		conditions = append(conditions, fmt.Sprintf("last_active_at >= $%d", len(args)))
+	}
+
+	filterSQL := ""
+	if len(conditions) > 0 {
+		filterSQL = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	query := fmt.Sprintf(`
+		WITH scored AS (
+			SELECT
+				u.id AS user_id,
+				u.username,
+				u.country,
+				u.last_active_at,
+				COALESCE(p.confidence_score, 50) AS confidence_score,
+				COALESCE(p.completed_challenges, 0) AS completed_challenges,
+				ROUND(
+					LEAST(
+						1000.0,
+						GREATEST(
+							0.0,
+							(
+								COALESCE(MAX(CASE WHEN us.skill_code = 'react' THEN us.score END), 0) * 0.45 +
+								COALESCE(MAX(CASE WHEN us.skill_code = 'javascript' THEN us.score END), 0) * 0.20 +
+								COALESCE(MAX(CASE WHEN us.skill_code = 'performance' THEN us.score END), 0) * 0.15 +
+								COALESCE(MAX(CASE WHEN us.skill_code = 'architecture' THEN us.score END), 0) * 0.10 +
+								COALESCE(MAX(CASE WHEN us.skill_code = 'consistency' THEN us.score END), 0) * 0.10
+							) * CASE
+								WHEN u.last_active_at IS NULL OR $1::timestamptz <= u.last_active_at OR $1::timestamptz - u.last_active_at <= INTERVAL '21 days' THEN 1.0
+								ELSE POWER(0.99::double precision, GREATEST(EXTRACT(EPOCH FROM ($1::timestamptz - u.last_active_at)) / 86400.0 - 21.0, 0.0))
+							END
+						)
+					)::numeric,
+					2
+				) AS current_skill_score
+			FROM users u
+			LEFT JOIN user_profiles p ON p.user_id = u.id
+			LEFT JOIN user_skills us ON us.user_id = u.id
+			WHERE u.role = 'user'
+			GROUP BY u.id, u.username, u.country, u.last_active_at, p.confidence_score, p.completed_challenges
+		),
+		ranked AS (
+			SELECT
+				user_id,
+				username,
+				country,
+				current_skill_score,
+				confidence_score,
+				last_active_at,
+				completed_challenges,
+				ROW_NUMBER() OVER (ORDER BY current_skill_score DESC, confidence_score DESC, last_active_at DESC, username ASC) AS rank,
+				COUNT(*) OVER () AS total_count
+			FROM scored
+		),
+		filtered AS (
+			SELECT
+				user_id,
+				username,
+				country,
+				current_skill_score,
+				confidence_score,
+				CASE
+					WHEN total_count <= 1 THEN 100.0
+					ELSE ROUND((((total_count - rank)::numeric) / ((total_count - 1)::numeric)) * 100.0, 2)
+				END AS percentile,
+				rank,
+				last_active_at,
+				completed_challenges
+			FROM ranked
+		)
+		SELECT
+			user_id,
+			username,
+			country,
+			current_skill_score,
+			confidence_score,
+			percentile,
+			rank,
+			last_active_at,
+			completed_challenges
+		FROM filtered
+		%s
+		ORDER BY rank
+	`, filterSQL)
+
+	return s.queryRankingEntries(ctx, query, args...)
+}
+
+func (s *SQLStore) queryRankingEntries(ctx context.Context, query string, args ...any) ([]RankingEntry, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []RankingEntry
+	for rows.Next() {
+		var entry RankingEntry
+		if err := rows.Scan(
+			&entry.UserID,
+			&entry.Username,
+			&entry.Country,
+			&entry.CurrentSkillScore,
+			&entry.ConfidenceScore,
+			&entry.Percentile,
+			&entry.Rank,
+			&entry.LastActiveAt,
+			&entry.CompletedChallenges,
+		); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
 }
 
 func (s *SQLStore) loadUsers(ctx context.Context, app *App) error {

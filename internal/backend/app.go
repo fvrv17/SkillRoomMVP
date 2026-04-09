@@ -807,7 +807,11 @@ func (a *App) handleSearchCandidates(w http.ResponseWriter, r *http.Request) {
 	topPercent, _ := strconv.ParseFloat(r.URL.Query().Get("top_percent"), 64)
 	activeDays, _ := strconv.Atoi(r.URL.Query().Get("active_days"))
 	minConfidence, _ := strconv.ParseFloat(r.URL.Query().Get("min_confidence"), 64)
-	results, monetization := a.searchCandidates(user.ID, minScore, minConfidence, topPercent, activeDays)
+	results, monetization, err := a.searchCandidates(r.Context(), user.ID, minScore, minConfidence, topPercent, activeDays)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"candidates":   results,
 		"monetization": monetization,
@@ -820,7 +824,11 @@ func (a *App) handleHRLeaderboard(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	results, monetization := a.searchCandidates(user.ID, 0, 0, 0, 0)
+	results, monetization, err := a.searchCandidates(r.Context(), user.ID, 0, 0, 0, 0)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"rankings":     results,
 		"monetization": monetization,
@@ -1195,7 +1203,7 @@ func (a *App) listTemplates(ctx context.Context, category string) ([]ChallengeTe
 func (a *App) rankingsCached(ctx context.Context, kind, country, userID string) ([]RankingEntry, error) {
 	cacheKey := fmt.Sprintf("rankings:%s:%s:%s", kind, country, userID)
 	return cacheJSON(ctx, a.ops, cacheKey, 45*time.Second, func() ([]RankingEntry, error) {
-		return a.rankings(kind, country, userID), nil
+		return a.rankings(ctx, kind, country, userID)
 	})
 }
 
@@ -2064,7 +2072,16 @@ func (a *App) createJob(ctx context.Context, ownerUserID, companyID string, req 
 	return job, nil
 }
 
-func (a *App) searchCandidates(recruiterUserID string, minScore, minConfidence, topPercent float64, activeDays int) ([]CandidateView, MonetizationSummary) {
+func (a *App) searchCandidates(ctx context.Context, recruiterUserID string, minScore, minConfidence, topPercent float64, activeDays int) ([]CandidateView, MonetizationSummary, error) {
+	if a.store != nil {
+		return a.searchCandidatesSQL(ctx, recruiterUserID, CandidateSearchFilters{
+			MinScore:      minScore,
+			MinConfidence: minConfidence,
+			TopPercent:    topPercent,
+			ActiveDays:    activeDays,
+		})
+	}
+
 	now := time.Now().UTC()
 	if !a.rankingSnapshotFresh(now) {
 		a.mu.Lock()
@@ -2098,7 +2115,35 @@ func (a *App) searchCandidates(recruiterUserID string, minScore, minConfidence, 
 		}
 		out = append(out, a.candidatePreviewLocked(recruiterUserID, user, monetization))
 	}
-	return out, monetization
+	return out, monetization, nil
+}
+
+func (a *App) searchCandidatesSQL(ctx context.Context, recruiterUserID string, filters CandidateSearchFilters) ([]CandidateView, MonetizationSummary, error) {
+	entries, err := a.store.SearchCandidateEntries(ctx, filters, time.Now().UTC())
+	if err != nil {
+		return nil, MonetizationSummary{}, err
+	}
+
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	monetization := a.monetizationSummaryLocked(recruiterUserID)
+	out := make([]CandidateView, 0, len(entries))
+	for _, entry := range entries {
+		user, ok := a.users[entry.UserID]
+		if !ok {
+			continue
+		}
+		user.Username = entry.Username
+		user.Country = entry.Country
+		user.LastActiveAt = entry.LastActiveAt
+		user.Profile.CurrentSkillScore = entry.CurrentSkillScore
+		user.Profile.PercentileGlobal = entry.Percentile
+		user.Profile.ConfidenceScore = entry.ConfidenceScore
+		user.Profile.CompletedChallenges = entry.CompletedChallenges
+		out = append(out, a.candidatePreviewLocked(recruiterUserID, user, monetization))
+	}
+	return out, monetization, nil
 }
 
 func (a *App) shortlistCandidate(ctx context.Context, ownerUserID string, req ShortlistRequest) (HRShortlist, error) {
@@ -2126,7 +2171,11 @@ func (a *App) shortlistCandidate(ctx context.Context, ownerUserID string, req Sh
 	return entry, nil
 }
 
-func (a *App) rankings(kind, country, userID string) []RankingEntry {
+func (a *App) rankings(ctx context.Context, kind, country, userID string) ([]RankingEntry, error) {
+	if a.store != nil {
+		return a.store.QueryRankingEntries(ctx, kind, country, userID, time.Now().UTC())
+	}
+
 	now := time.Now().UTC()
 	if !a.rankingSnapshotFresh(now) {
 		a.mu.Lock()
@@ -2136,7 +2185,7 @@ func (a *App) rankings(kind, country, userID string) []RankingEntry {
 
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.rankingsFromSnapshotLocked(kind, country, userID)
+	return a.rankingsFromSnapshotLocked(kind, country, userID), nil
 }
 
 func (a *App) recomputeRankingsLocked() {
