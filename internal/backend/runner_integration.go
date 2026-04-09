@@ -12,6 +12,11 @@ import (
 	runsvc "github.com/fvrv17/mvp/internal/runner"
 )
 
+var (
+	errRunnerUnavailable = errors.New("runner unavailable")
+	errRunnerTimeout     = errors.New("runner timed out")
+)
+
 func (a *App) runChallenge(ctx context.Context, userID, instanceID string, req SubmitChallengeRequest) (map[string]any, error) {
 	if strings.TrimSpace(req.Language) == "" {
 		return nil, errors.New("language is required")
@@ -158,7 +163,7 @@ func (a *App) submitChallenge(ctx context.Context, userID, instanceID string, re
 func (a *App) executeChallenge(ctx context.Context, templateDef ChallengeTemplate, variant ChallengeVariant, language string, files map[string]string) (RunnerReport, error) {
 	engine := a.runner
 	if engine == nil {
-		return RunnerReport{}, errors.New("runner is not configured")
+		return RunnerReport{}, fmt.Errorf("%w: engine is not configured", errRunnerUnavailable)
 	}
 	result, err := engine.Run(ctx, runsvc.RunRequest{
 		Language:      language,
@@ -168,7 +173,10 @@ func (a *App) executeChallenge(ctx context.Context, templateDef ChallengeTemplat
 		MemoryMB:      templateDef.EvaluationConfig.MemoryMB,
 	})
 	if err != nil {
-		return RunnerReport{}, err
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "timed out") {
+			return RunnerReport{}, fmt.Errorf("%w: %v", errRunnerTimeout, err)
+		}
+		return RunnerReport{}, fmt.Errorf("%w: %v", errRunnerUnavailable, err)
 	}
 	return runnerReportFromResult(result), nil
 }

@@ -275,6 +275,75 @@ func TestPersistentAppUsesSQLBackedRankingsAndCandidateSearch(t *testing.T) {
 	}
 }
 
+func TestPersistentReadinessFailsWhenPostgresStops(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres-backed integration test in short mode")
+	}
+
+	dockerBinary := requireDockerDaemon(t)
+	postgresContainer := startDockerContainer(t, dockerBinary,
+		"postgres:16-alpine",
+		"-e", "POSTGRES_DB=mvp",
+		"-e", "POSTGRES_USER=postgres",
+		"-e", "POSTGRES_PASSWORD=postgres",
+		"-P",
+	)
+	postgresPort := dockerMappedPort(t, dockerBinary, postgresContainer, "5432/tcp")
+	dsn := fmt.Sprintf("postgres://postgres:postgres@127.0.0.1:%s/mvp?sslmode=disable", postgresPort)
+	waitFor(t, 30*time.Second, func() error {
+		store, err := OpenSQLStore(context.Background(), dsn)
+		if err != nil {
+			return err
+		}
+		return store.Close()
+	})
+
+	app := newPersistentTestApp(t, dsn)
+	app.SetChallengeRunner(readyRunnerStub{})
+	router := app.Router()
+
+	if _, err := runDockerCommand(dockerBinary, "stop", postgresContainer); err != nil {
+		t.Fatalf("stop postgres container: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when postgres is unavailable, got %d", recorder.Code)
+	}
+}
+
+func TestReadinessFailsWhenRedisStops(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Redis-backed integration test in short mode")
+	}
+
+	dockerBinary := requireDockerDaemon(t)
+	redisContainer := startDockerContainer(t, dockerBinary, "redis:7-alpine", "-P", "--", "--save", "", "--appendonly", "no")
+	redisAddr := net.JoinHostPort("127.0.0.1", dockerMappedPort(t, dockerBinary, redisContainer, "6379/tcp"))
+	store := NewRedisOpsStore(redisAddr, "", 0)
+	waitFor(t, 20*time.Second, func() error {
+		return store.Ping(context.Background())
+	})
+
+	app := NewApp("redis-ready-secret", "redis-ready-issuer")
+	app.SetChallengeRunner(readyRunnerStub{})
+	app.SetOpsStore(store)
+	router := app.Router()
+
+	if _, err := runDockerCommand(dockerBinary, "stop", redisContainer); err != nil {
+		t.Fatalf("stop redis container: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when redis is unavailable, got %d", recorder.Code)
+	}
+}
+
 func TestRedisOpsStoreExercisesCacheAndRateLimit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Redis-backed integration test in short mode")

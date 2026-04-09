@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -37,10 +38,11 @@ type runPreviewResponse struct {
 
 type stubRunner struct {
 	result runsvc.RunResult
+	err    error
 }
 
 func (s stubRunner) Run(context.Context, runsvc.RunRequest) (runsvc.RunResult, error) {
-	return s.result, nil
+	return s.result, s.err
 }
 
 func newTestApp() *App {
@@ -345,6 +347,50 @@ func TestAuthSupportsCookieRefreshAndLogout(t *testing.T) {
 	}
 }
 
+func TestRefreshRejectsInvalidAndExpiredTokens(t *testing.T) {
+	app := newTestApp()
+	router := app.Router()
+
+	registerResp := performJSON(t, router, http.MethodPost, "/v1/auth/register", RegisterRequest{
+		Email:    "refresh-failure@example.com",
+		Username: "refresh-failure",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleUser,
+	}, "")
+	if registerResp.Code != http.StatusCreated {
+		t.Fatalf("register failed: %d", registerResp.Code)
+	}
+	refreshCookie := findCookie(t, registerResp, refreshTokenCookieName)
+	if refreshCookie == nil {
+		t.Fatal("expected refresh cookie to be set")
+	}
+
+	invalidReq := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", bytes.NewBufferString(`{}`))
+	invalidReq.Header.Set("Content-Type", "application/json")
+	invalidReq.AddCookie(&http.Cookie{Name: refreshTokenCookieName, Value: "rfr_invalid"})
+	invalidResp := httptest.NewRecorder()
+	router.ServeHTTP(invalidResp, invalidReq)
+	if invalidResp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected invalid refresh to return 401, got %d", invalidResp.Code)
+	}
+
+	app.mu.Lock()
+	session := app.refreshSessions[refreshCookie.Value]
+	session.ExpiresAt = time.Now().UTC().Add(-time.Minute)
+	app.refreshSessions[refreshCookie.Value] = session
+	app.mu.Unlock()
+
+	expiredReq := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", bytes.NewBufferString(`{}`))
+	expiredReq.Header.Set("Content-Type", "application/json")
+	expiredReq.AddCookie(refreshCookie)
+	expiredResp := httptest.NewRecorder()
+	router.ServeHTTP(expiredResp, expiredReq)
+	if expiredResp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected expired refresh to return 401, got %d", expiredResp.Code)
+	}
+}
+
 func TestAuthRateLimitUsesStableClientIP(t *testing.T) {
 	app := newTestApp()
 	router := app.Router()
@@ -372,6 +418,52 @@ func TestAuthRateLimitUsesStableClientIP(t *testing.T) {
 	}, "", "203.0.113.10:49999")
 	if limitedResp.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected stable IP rate limit to trigger, got %d", limitedResp.Code)
+	}
+}
+
+func TestChallengeRunReturnsServiceUnavailableWhenRunnerFails(t *testing.T) {
+	app := NewApp("test-secret", "test-issuer")
+	app.SetChallengeRunner(stubRunner{err: errors.New("runner offline")})
+	router := app.Router()
+
+	token := registerAndLogin(t, router, RegisterRequest{
+		Email:    "runner-unavailable@example.com",
+		Username: "runner-unavailable",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleUser,
+	})
+	instance := startChallengeInstance(t, router, token, "react_feature_search")
+
+	resp := performJSON(t, router, http.MethodPost, "/v1/challenges/instances/"+instance.Instance.ID+"/runs", SubmitChallengeRequest{
+		Language:    "jsx",
+		RawCodeText: searchSolutionCode(),
+	}, token)
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when runner is unavailable, got %d", resp.Code)
+	}
+}
+
+func TestChallengeRunReturnsGatewayTimeoutWhenRunnerTimesOut(t *testing.T) {
+	app := NewApp("test-secret", "test-issuer")
+	app.SetChallengeRunner(stubRunner{err: errors.New("sandbox execution timed out")})
+	router := app.Router()
+
+	token := registerAndLogin(t, router, RegisterRequest{
+		Email:    "runner-timeout@example.com",
+		Username: "runner-timeout",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleUser,
+	})
+	instance := startChallengeInstance(t, router, token, "react_feature_search")
+
+	resp := performJSON(t, router, http.MethodPost, "/v1/challenges/instances/"+instance.Instance.ID+"/runs", SubmitChallengeRequest{
+		Language:    "jsx",
+		RawCodeText: searchSolutionCode(),
+	}, token)
+	if resp.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected 504 when runner times out, got %d", resp.Code)
 	}
 }
 

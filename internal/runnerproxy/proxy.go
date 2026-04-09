@@ -33,7 +33,7 @@ var (
 
 const (
 	defaultAllowedWorkingDir  = "/workspace"
-	defaultAllowedUser        = "0:0"
+	defaultAllowedUser        = "1000:1000"
 	defaultAllowedArchivePath = "/workspace"
 	defaultMaxDockerBodyBytes = 64 * 1024
 	defaultMaxNanoCPUs        = int64(1_000_000_000)

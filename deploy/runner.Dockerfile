@@ -11,7 +11,9 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 
 FROM node:20-alpine
 
-RUN apk add --no-cache ca-certificates tzdata wget
+RUN apk add --no-cache ca-certificates tzdata wget \
+ && mkdir -p /workspace \
+ && chown -R node:node /workspace /opt
 
 WORKDIR /opt/skillroom-runtime
 

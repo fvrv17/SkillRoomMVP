@@ -20,6 +20,7 @@ func main() {
 	shutdownTimeout := config.Duration("RUNNER_SHUTDOWN_TIMEOUT", 10*time.Second)
 	sandboxImage := config.String("RUNNER_SANDBOX_IMAGE", "deploy-runner:latest")
 	sandboxCommand := config.String("RUNNER_SANDBOX_COMMAND", "node /opt/skillroom-runtime/run-evaluation.mjs")
+	sandboxUser := config.String("RUNNER_SANDBOX_USER", "1000:1000")
 	dockerHost := config.String("RUNNER_DOCKER_HOST", "")
 	cpuLimit := config.String("RUNNER_CPU_LIMIT", "0.50")
 	memoryMB := config.Int("RUNNER_MEMORY_MB", 256)
@@ -29,6 +30,7 @@ func main() {
 		DockerHost:     dockerHost,
 		SandboxImage:   sandboxImage,
 		SandboxCommand: sandboxCommand,
+		SandboxUser:    sandboxUser,
 		DefaultCPU:     cpuLimit,
 		DefaultMemory:  memoryMB,
 		DefaultTimeout: defaultTimeout,

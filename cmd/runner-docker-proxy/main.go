@@ -17,6 +17,7 @@ func main() {
 	socketPath := config.String("RUNNER_DOCKER_SOCKET", "/var/run/docker.sock")
 	sandboxImage := config.String("RUNNER_SANDBOX_IMAGE", "deploy-runner:latest")
 	sandboxCommand := config.String("RUNNER_SANDBOX_COMMAND", "node /opt/skillroom-runtime/run-evaluation.mjs")
+	sandboxUser := config.String("RUNNER_SANDBOX_USER", "1000:1000")
 	maxMemoryMB := config.Int("RUNNER_DOCKER_PROXY_MAX_MEMORY_MB", 512)
 	maxPids := config.Int("RUNNER_DOCKER_PROXY_MAX_PIDS", 512)
 	readTimeout := config.Duration("RUNNER_DOCKER_PROXY_READ_TIMEOUT", 5*time.Second)
@@ -28,6 +29,7 @@ func main() {
 		SocketPath:      socketPath,
 		AllowedImage:    sandboxImage,
 		AllowedCommands: []string{sandboxCommand},
+		AllowedUser:     sandboxUser,
 		MaxMemoryBytes:  int64(maxMemoryMB) * 1024 * 1024,
 		MaxPidsLimit:    int64(maxPids),
 	})

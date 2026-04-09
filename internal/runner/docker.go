@@ -24,6 +24,7 @@ import (
 
 const (
 	defaultSandboxCommand = "node /opt/skillroom-runtime/run-evaluation.mjs"
+	defaultSandboxUser    = "1000:1000"
 	defaultCPUFraction    = "0.50"
 	defaultMemoryMB       = 256
 	defaultTimeout        = 60 * time.Second
@@ -34,6 +35,7 @@ type DockerConfig struct {
 	DockerHost     string
 	SandboxImage   string
 	SandboxCommand string
+	SandboxUser    string
 	DefaultCPU     string
 	DefaultMemory  int
 	DefaultTimeout time.Duration
@@ -51,6 +53,9 @@ type DockerEngine struct {
 func NewDockerEngine(config DockerConfig) *DockerEngine {
 	if strings.TrimSpace(config.SandboxCommand) == "" {
 		config.SandboxCommand = defaultSandboxCommand
+	}
+	if strings.TrimSpace(config.SandboxUser) == "" {
+		config.SandboxUser = defaultSandboxUser
 	}
 	if strings.TrimSpace(config.DefaultCPU) == "" {
 		config.DefaultCPU = defaultCPUFraction
@@ -227,7 +232,7 @@ func (e *DockerEngine) createContainer(ctx context.Context, name, command, cpuFr
 	payload := map[string]any{
 		"Image":      e.config.SandboxImage,
 		"WorkingDir": "/workspace",
-		"User":       "0:0",
+		"User":       e.config.SandboxUser,
 		"Entrypoint": []string{"sh"},
 		"Cmd":        []string{"-lc", command},
 		"HostConfig": map[string]any{

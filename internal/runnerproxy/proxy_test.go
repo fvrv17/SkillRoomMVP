@@ -50,7 +50,7 @@ func TestValidateDockerRequestAllowsExpectedContainerCreate(t *testing.T) {
 	body := []byte(`{
 		"Image":"deploy-runner:latest",
 		"WorkingDir":"/workspace",
-		"User":"0:0",
+		"User":"1000:1000",
 		"Entrypoint":["sh"],
 		"Cmd":["-lc","node /opt/skillroom-runtime/run-evaluation.mjs"],
 		"HostConfig":{
@@ -81,15 +81,15 @@ func TestValidateDockerRequestRejectsUnexpectedContainerCreateBody(t *testing.T)
 	}{
 		{
 			name: "wrong image",
-			body: `{"Image":"evil:latest","WorkingDir":"/workspace","User":"0:0","Entrypoint":["sh"],"Cmd":["-lc","node /opt/skillroom-runtime/run-evaluation.mjs"],"HostConfig":{"NetworkMode":"none","NanoCpus":500000000,"Memory":268435456,"PidsLimit":512,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}]}}`,
+			body: `{"Image":"evil:latest","WorkingDir":"/workspace","User":"1000:1000","Entrypoint":["sh"],"Cmd":["-lc","node /opt/skillroom-runtime/run-evaluation.mjs"],"HostConfig":{"NetworkMode":"none","NanoCpus":500000000,"Memory":268435456,"PidsLimit":512,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}]}}`,
 		},
 		{
 			name: "privileged via unknown field",
-			body: `{"Image":"deploy-runner:latest","WorkingDir":"/workspace","User":"0:0","Entrypoint":["sh"],"Cmd":["-lc","node /opt/skillroom-runtime/run-evaluation.mjs"],"HostConfig":{"NetworkMode":"none","NanoCpus":500000000,"Memory":268435456,"PidsLimit":512,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}],"Privileged":true}}`,
+			body: `{"Image":"deploy-runner:latest","WorkingDir":"/workspace","User":"1000:1000","Entrypoint":["sh"],"Cmd":["-lc","node /opt/skillroom-runtime/run-evaluation.mjs"],"HostConfig":{"NetworkMode":"none","NanoCpus":500000000,"Memory":268435456,"PidsLimit":512,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}],"Privileged":true}}`,
 		},
 		{
 			name: "unexpected command",
-			body: `{"Image":"deploy-runner:latest","WorkingDir":"/workspace","User":"0:0","Entrypoint":["sh"],"Cmd":["-lc","apk add curl"],"HostConfig":{"NetworkMode":"none","NanoCpus":500000000,"Memory":268435456,"PidsLimit":512,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}]}}`,
+			body: `{"Image":"deploy-runner:latest","WorkingDir":"/workspace","User":"1000:1000","Entrypoint":["sh"],"Cmd":["-lc","apk add curl"],"HostConfig":{"NetworkMode":"none","NanoCpus":500000000,"Memory":268435456,"PidsLimit":512,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Ulimits":[{"Name":"nproc","Soft":512,"Hard":512}]}}`,
 		},
 	}
 

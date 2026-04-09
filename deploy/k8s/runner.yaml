@@ -47,6 +47,8 @@ spec:
               value: "ghcr.io/fvrv17/mvp-runner:latest"
             - name: RUNNER_SANDBOX_COMMAND
               value: "node /opt/skillroom-runtime/run-evaluation.mjs"
+            - name: RUNNER_SANDBOX_USER
+              value: "1000:1000"
             - name: RUNNER_DOCKER_HOST
               value: "http://127.0.0.1:2375"
           readinessProbe:
@@ -83,6 +85,8 @@ spec:
               value: "ghcr.io/fvrv17/mvp-runner:latest"
             - name: RUNNER_SANDBOX_COMMAND
               value: "node /opt/skillroom-runtime/run-evaluation.mjs"
+            - name: RUNNER_SANDBOX_USER
+              value: "1000:1000"
             - name: RUNNER_DOCKER_PROXY_MAX_MEMORY_MB
               value: "512"
             - name: RUNNER_DOCKER_PROXY_MAX_PIDS

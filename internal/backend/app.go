@@ -615,7 +615,7 @@ func (a *App) handleSubmitChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.submitChallenge(r.Context(), user.ID, chi.URLParam(r, "instanceID"), req)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteError(w, challengeExecutionStatus(err), err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, result)
@@ -634,10 +634,21 @@ func (a *App) handleRunChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.runChallenge(r.Context(), user.ID, chi.URLParam(r, "instanceID"), req)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteError(w, challengeExecutionStatus(err), err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, result)
+}
+
+func challengeExecutionStatus(err error) int {
+	switch {
+	case errors.Is(err, errRunnerTimeout):
+		return http.StatusGatewayTimeout
+	case errors.Is(err, errRunnerUnavailable):
+		return http.StatusServiceUnavailable
+	default:
+		return http.StatusBadRequest
+	}
 }
 
 func (a *App) handleFriendRequest(w http.ResponseWriter, r *http.Request) {
