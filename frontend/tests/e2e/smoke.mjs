@@ -26,6 +26,7 @@ async function run() {
   const browser = await chromium.launch({ headless: true });
   try {
     await candidateFlow(browser);
+    await refreshFailureFlow(browser);
     await recruiterFlow(browser);
     console.log("browser smoke passed");
   } finally {
@@ -75,23 +76,9 @@ async function candidateFlow(browser) {
 
 async function recruiterFlow(browser) {
   const unique = Date.now() + 1000;
-  const candidateEmail = `candidate-hr-${unique}@skillroom.dev`;
-  const candidateUsername = `candidate-hr-${unique}`;
-
-  const registerResponse = await fetch(`${baseURL}/backend/v1/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: candidateEmail,
-      username: candidateUsername,
-      password: "password123",
-      country: "US",
-      role: "user",
-    }),
-  });
-  assert.equal(registerResponse.status, 201, "expected candidate registration for recruiter smoke");
-  const candidatePayload = await registerResponse.json();
-  const candidateUserID = candidatePayload.user.id;
+  const seededCandidates = await Promise.all(
+    [0, 1, 2, 3].map((index) => registerCandidateByAPI(unique, index)),
+  );
 
   const page = await browser.newPage({ baseURL });
   const authForm = page.locator("form.auth-form");
@@ -107,8 +94,7 @@ async function recruiterFlow(browser) {
   await page.getByTestId("nav-leaderboard").click({ force: true });
   await page.getByText("Candidate leaderboard", { exact: true }).first().waitFor({ state: "visible", timeout: 30_000 });
   await waitForWorkspaceIdle(page);
-  await page.getByTestId(`leaderboard-open-${candidateUserID}`).waitFor({ state: "visible", timeout: 30_000 });
-  await page.getByTestId(`leaderboard-open-${candidateUserID}`).click();
+  await openLeaderboardCandidate(page, seededCandidates[0]);
 
   await page.getByTestId("candidate-detail").waitFor({ state: "visible", timeout: 30_000 });
   await page.getByTestId("candidate-unlock").click();
@@ -124,8 +110,84 @@ async function recruiterFlow(browser) {
   }, { timeout: 30_000 });
   const inviteText = await page.getByTestId("candidate-invite").innerText();
   assert.match(inviteText, /Invited/i, "expected candidate invite action to complete");
+  await page.getByRole("button", { name: "Back to leaderboard" }).click();
+  await page.getByText("Candidate leaderboard", { exact: true }).first().waitFor({ state: "visible", timeout: 30_000 });
+
+  await openLeaderboardCandidate(page, seededCandidates[1]);
+  await page.getByTestId("candidate-unlock").click();
+  await page.getByTestId("candidate-invite").waitFor({ state: "visible", timeout: 30_000 });
+  await page.getByTestId("candidate-invite").click();
+  await page.waitForFunction(() => {
+    const action = document.querySelector('[data-testid="candidate-invite"]');
+    return Boolean(action && /Invited/i.test(action.textContent || ""));
+  }, { timeout: 30_000 });
+
+  await openLeaderboardCandidate(page, seededCandidates[2]);
+  await page.getByTestId("candidate-unlock").click();
+  await page.getByTestId("candidate-invite").waitFor({ state: "visible", timeout: 30_000 });
+  await expectButtonState(page.getByTestId("candidate-invite"), /Invite limit reached/i, true);
+
+  await openLeaderboardCandidate(page, seededCandidates[3]);
+  await page.getByTestId("candidate-unlock").waitFor({ state: "visible", timeout: 30_000 });
+  await expectButtonState(page.getByTestId("candidate-unlock"), /Unlock limit reached/i, true);
 
   await page.close();
+}
+
+async function refreshFailureFlow(browser) {
+  const page = await browser.newPage({ baseURL });
+  await page.context().addCookies([
+    {
+      name: "skillroom_refresh",
+      value: "rfr_invalid",
+      url: baseURL,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.goto("/workspace");
+  await page.getByRole("heading", { name: "No active workspace" }).waitFor({ state: "visible", timeout: 30_000 });
+  const bodyText = await page.locator("main").innerText();
+  assert.match(bodyText, /sign in/i, "expected refresh failure to fall back to the signed-out workspace state");
+  await page.close();
+}
+
+async function registerCandidateByAPI(unique, index) {
+  const candidateEmail = `candidate-hr-${unique}-${index}@skillroom.dev`;
+  const candidateUsername = `candidate-hr-${unique}-${index}`;
+  const registerResponse = await fetch(`${baseURL}/backend/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: candidateEmail,
+      username: candidateUsername,
+      password: "password123",
+      country: "US",
+      role: "user",
+    }),
+  });
+  assert.equal(registerResponse.status, 201, "expected candidate registration for recruiter smoke");
+  const candidatePayload = await registerResponse.json();
+  return { email: candidateEmail, username: candidateUsername, userID: candidatePayload.user.id };
+}
+
+async function openLeaderboardCandidate(page, candidate) {
+  await page.getByTestId("nav-leaderboard").click({ force: true });
+  await page.getByText("Candidate leaderboard", { exact: true }).first().waitFor({ state: "visible", timeout: 30_000 });
+  await waitForWorkspaceIdle(page);
+  await page.getByTestId(`leaderboard-open-${candidate.userID}`).waitFor({ state: "visible", timeout: 30_000 });
+  await page.getByTestId(`leaderboard-open-${candidate.userID}`).click();
+  const detail = page.getByTestId("candidate-detail");
+  await detail.waitFor({ state: "visible", timeout: 30_000 });
+  await detail.getByRole("heading", { name: candidate.username }).waitFor({ state: "visible", timeout: 30_000 });
+}
+
+async function expectButtonState(locator, label, disabled) {
+  await locator.waitFor({ state: "visible", timeout: 30_000 });
+  const text = await locator.innerText();
+  assert.match(text, label);
+  assert.equal(await locator.isDisabled(), disabled, `expected ${text} disabled=${disabled}`);
 }
 
 async function waitForWorkspaceIdle(page) {
