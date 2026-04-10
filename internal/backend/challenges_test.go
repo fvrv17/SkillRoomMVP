@@ -20,6 +20,15 @@ func TestDefaultChallengeTemplatesProvidesBroadCoverage(t *testing.T) {
 		if len(templateDef.EvaluationConfig.QualityCheckIDs) == 0 {
 			t.Fatalf("template %s is missing quality checks", templateDef.ID)
 		}
+		if templateDef.ProfessionCode != defaultProfessionCode {
+			t.Fatalf("template %s has unexpected profession_code %q", templateDef.ID, templateDef.ProfessionCode)
+		}
+		if templateDef.TrackCode != defaultDeveloperTrackCode {
+			t.Fatalf("template %s has unexpected track_code %q", templateDef.ID, templateDef.TrackCode)
+		}
+		if templateDef.RuntimeCode != defaultDeveloperRuntimeCode {
+			t.Fatalf("template %s has unexpected runtime_code %q", templateDef.ID, templateDef.RuntimeCode)
+		}
 	}
 	if len(seen) != len(templates) {
 		t.Fatalf("expected unique template ids")

@@ -97,6 +97,9 @@ func TestPersistentAppRestoresStateAcrossRestart(t *testing.T) {
 	if profile.CurrentSkillScore <= 0 {
 		t.Fatalf("expected persisted skill score to be positive, got %.2f", profile.CurrentSkillScore)
 	}
+	if profile.ProfessionCode != defaultProfessionCode || profile.TrackCode != defaultDeveloperTrackCode || profile.RuntimeCode != defaultDeveloperRuntimeCode || profile.RoomProfileCode != defaultDeveloperRoomProfile {
+		t.Fatalf("expected persisted profession foundation defaults, got %+v", profile)
+	}
 
 	monetizationResp := performJSON(t, reloadedRouter, http.MethodGet, "/v1/monetization/summary", nil, refreshed.AccessToken)
 	if monetizationResp.Code != http.StatusOK {

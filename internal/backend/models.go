@@ -25,6 +25,10 @@ type User struct {
 type UserProfile struct {
 	UserID              string    `json:"user_id"`
 	SelectedTrack       string    `json:"selected_track"`
+	ProfessionCode      string    `json:"profession_code,omitempty"`
+	TrackCode           string    `json:"track_code,omitempty"`
+	RuntimeCode         string    `json:"runtime_code,omitempty"`
+	RoomProfileCode     string    `json:"room_profile_code,omitempty"`
 	Bio                 string    `json:"bio,omitempty"`
 	AvatarURL           string    `json:"avatar_url,omitempty"`
 	LinkedInURL         string    `json:"linkedin_url,omitempty"`
@@ -98,6 +102,9 @@ type ChallengeTemplate struct {
 	EvaluationConfig     EvaluationConfig    `json:"evaluation_config_json"`
 	IsActive             bool                `json:"is_active"`
 	Track                string              `json:"track"`
+	ProfessionCode       string              `json:"profession_code,omitempty"`
+	TrackCode            string              `json:"track_code,omitempty"`
+	RuntimeCode          string              `json:"runtime_code,omitempty"`
 	VariationStrings     map[string][]string `json:"variation_strings"`
 	VariationNumbers     map[string][]int    `json:"variation_numbers"`
 	SkillWeights         map[string]float64  `json:"skill_weights"`

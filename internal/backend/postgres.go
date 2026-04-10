@@ -169,7 +169,7 @@ func (s *SQLStore) SyncCatalog(ctx context.Context, app *App) error {
 	}
 
 	for _, templateID := range sortedTemplateIDs(app.templates) {
-		templateDef := app.templates[templateID]
+		templateDef := normalizeChallengeTemplateMetadata(app.templates[templateID])
 		evaluationConfig, err := marshalJSON(templateDef.EvaluationConfig)
 		if err != nil {
 			return err
@@ -191,30 +191,34 @@ func (s *SQLStore) SyncCatalog(ctx context.Context, app *App) error {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO challenge_templates (
-				id, slug, title, difficulty, description_md, asset_directory, editable_files_json, starter_code_template, visible_tests_template,
-				evaluation_config_json, is_active, category, track, variation_strings_json, variation_numbers_json, skill_weights_json
-			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-			ON CONFLICT (id) DO UPDATE SET
-				slug = EXCLUDED.slug,
-				title = EXCLUDED.title,
+				INSERT INTO challenge_templates (
+					id, slug, title, difficulty, description_md, asset_directory, editable_files_json, starter_code_template, visible_tests_template,
+					evaluation_config_json, is_active, category, track, profession_code, track_code, runtime_code, variation_strings_json, variation_numbers_json, skill_weights_json
+				)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+				ON CONFLICT (id) DO UPDATE SET
+					slug = EXCLUDED.slug,
+					title = EXCLUDED.title,
 				difficulty = EXCLUDED.difficulty,
 				description_md = EXCLUDED.description_md,
 				asset_directory = EXCLUDED.asset_directory,
 				editable_files_json = EXCLUDED.editable_files_json,
 				starter_code_template = EXCLUDED.starter_code_template,
 				visible_tests_template = EXCLUDED.visible_tests_template,
-				evaluation_config_json = EXCLUDED.evaluation_config_json,
-				is_active = EXCLUDED.is_active,
-				category = EXCLUDED.category,
-				track = EXCLUDED.track,
-				variation_strings_json = EXCLUDED.variation_strings_json,
-				variation_numbers_json = EXCLUDED.variation_numbers_json,
-				skill_weights_json = EXCLUDED.skill_weights_json
-		`, templateDef.ID, templateDef.Slug, templateDef.Title, templateDef.Difficulty, templateDef.Description,
+					evaluation_config_json = EXCLUDED.evaluation_config_json,
+					is_active = EXCLUDED.is_active,
+					category = EXCLUDED.category,
+					track = EXCLUDED.track,
+					profession_code = EXCLUDED.profession_code,
+					track_code = EXCLUDED.track_code,
+					runtime_code = EXCLUDED.runtime_code,
+					variation_strings_json = EXCLUDED.variation_strings_json,
+					variation_numbers_json = EXCLUDED.variation_numbers_json,
+					skill_weights_json = EXCLUDED.skill_weights_json
+			`, templateDef.ID, templateDef.Slug, templateDef.Title, templateDef.Difficulty, templateDef.Description,
 			templateDef.AssetDirectory, editableFiles, templateDef.StarterCodeTemplate, templateDef.VisibleTestsTemplate, evaluationConfig, templateDef.IsActive,
-			templateDef.Category, templateDef.Track, variationStrings, variationNumbers, skillWeights); err != nil {
+			templateDef.Category, templateDef.Track, templateDef.ProfessionCode, templateDef.TrackCode, templateDef.RuntimeCode,
+			variationStrings, variationNumbers, skillWeights); err != nil {
 			return err
 		}
 	}
@@ -314,6 +318,8 @@ func (s *SQLStore) UpsertUserAggregate(ctx context.Context, user User, skills []
 	}
 	defer tx.Rollback()
 
+	user.Profile = normalizeUserProfileMetadata(user.Profile, user.Role)
+
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO users (id, email, username, password_hash, role, country, created_at, last_active_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -329,24 +335,29 @@ func (s *SQLStore) UpsertUserAggregate(ctx context.Context, user User, skills []
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO user_profiles (
-			user_id, selected_track, bio, avatar_url, linkedin_url, current_skill_score, percentile_global, percentile_country,
-			streak_days, confidence_score, completed_challenges, updated_at
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-		ON CONFLICT (user_id) DO UPDATE SET
-			selected_track = EXCLUDED.selected_track,
-			bio = EXCLUDED.bio,
-			avatar_url = EXCLUDED.avatar_url,
-			linkedin_url = EXCLUDED.linkedin_url,
+			INSERT INTO user_profiles (
+				user_id, selected_track, profession_code, track_code, runtime_code, room_profile_code, bio, avatar_url, linkedin_url, current_skill_score, percentile_global, percentile_country,
+				streak_days, confidence_score, completed_challenges, updated_at
+			)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+			ON CONFLICT (user_id) DO UPDATE SET
+				selected_track = EXCLUDED.selected_track,
+				profession_code = EXCLUDED.profession_code,
+				track_code = EXCLUDED.track_code,
+				runtime_code = EXCLUDED.runtime_code,
+				room_profile_code = EXCLUDED.room_profile_code,
+				bio = EXCLUDED.bio,
+				avatar_url = EXCLUDED.avatar_url,
+				linkedin_url = EXCLUDED.linkedin_url,
 			current_skill_score = EXCLUDED.current_skill_score,
 			percentile_global = EXCLUDED.percentile_global,
 			percentile_country = EXCLUDED.percentile_country,
 			streak_days = EXCLUDED.streak_days,
-			confidence_score = EXCLUDED.confidence_score,
-			completed_challenges = EXCLUDED.completed_challenges,
-			updated_at = EXCLUDED.updated_at
-	`, user.Profile.UserID, user.Profile.SelectedTrack, user.Profile.Bio, user.Profile.AvatarURL, user.Profile.LinkedInURL, user.Profile.CurrentSkillScore,
+				confidence_score = EXCLUDED.confidence_score,
+				completed_challenges = EXCLUDED.completed_challenges,
+				updated_at = EXCLUDED.updated_at
+		`, user.Profile.UserID, user.Profile.SelectedTrack, user.Profile.ProfessionCode, user.Profile.TrackCode, user.Profile.RuntimeCode, user.Profile.RoomProfileCode,
+		user.Profile.Bio, user.Profile.AvatarURL, user.Profile.LinkedInURL, user.Profile.CurrentSkillScore,
 		user.Profile.PercentileGlobal, user.Profile.PercentileCountry, user.Profile.StreakDays, user.Profile.ConfidenceScore,
 		user.Profile.CompletedChallenges, user.Profile.UpdatedAt); err != nil {
 		return err
@@ -941,7 +952,7 @@ func (s *SQLStore) queryRankingEntries(ctx context.Context, query string, args .
 func (s *SQLStore) loadUsers(ctx context.Context, app *App) error {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT u.id, u.email, u.username, u.password_hash, u.role, u.country, u.created_at, u.last_active_at,
-		       p.user_id, p.selected_track, p.bio, p.avatar_url, p.linkedin_url, p.current_skill_score, p.percentile_global,
+		       p.user_id, p.selected_track, p.profession_code, p.track_code, p.runtime_code, p.room_profile_code, p.bio, p.avatar_url, p.linkedin_url, p.current_skill_score, p.percentile_global,
 		       p.percentile_country, p.streak_days, p.confidence_score, p.completed_challenges, p.updated_at
 		FROM users u
 		LEFT JOIN user_profiles p ON p.user_id = u.id
@@ -954,12 +965,12 @@ func (s *SQLStore) loadUsers(ctx context.Context, app *App) error {
 	for rows.Next() {
 		var user User
 		var role string
-		var profileUserID, selectedTrack, bio, avatarURL, linkedInURL sql.NullString
+		var profileUserID, selectedTrack, professionCode, trackCode, runtimeCode, roomProfileCode, bio, avatarURL, linkedInURL sql.NullString
 		var currentSkillScore, percentileGlobal, percentileCountry, confidenceScore sql.NullFloat64
 		var streakDays, completedChallenges sql.NullInt64
 		var profileUpdatedAt sql.NullTime
 		if err := rows.Scan(&user.ID, &user.Email, &user.Username, &user.PasswordHash, &role, &user.Country,
-			&user.CreatedAt, &user.LastActiveAt, &profileUserID, &selectedTrack, &bio, &avatarURL, &linkedInURL, &currentSkillScore,
+			&user.CreatedAt, &user.LastActiveAt, &profileUserID, &selectedTrack, &professionCode, &trackCode, &runtimeCode, &roomProfileCode, &bio, &avatarURL, &linkedInURL, &currentSkillScore,
 			&percentileGlobal, &percentileCountry, &streakDays, &confidenceScore, &completedChallenges, &profileUpdatedAt); err != nil {
 			return err
 		}
@@ -977,6 +988,10 @@ func (s *SQLStore) loadUsers(ctx context.Context, app *App) error {
 		}
 		if profileUserID.Valid {
 			user.Profile.SelectedTrack = selectedTrack.String
+			user.Profile.ProfessionCode = professionCode.String
+			user.Profile.TrackCode = trackCode.String
+			user.Profile.RuntimeCode = runtimeCode.String
+			user.Profile.RoomProfileCode = roomProfileCode.String
 			user.Profile.Bio = bio.String
 			user.Profile.AvatarURL = avatarURL.String
 			user.Profile.LinkedInURL = linkedInURL.String
@@ -990,6 +1005,7 @@ func (s *SQLStore) loadUsers(ctx context.Context, app *App) error {
 				user.Profile.UpdatedAt = profileUpdatedAt.Time
 			}
 		}
+		user.Profile = normalizeUserProfileMetadata(user.Profile, user.Role)
 		app.users[user.ID] = user
 		app.emailIndex[user.Email] = user.ID
 	}

@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS user_profiles (
     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     selected_track TEXT NOT NULL,
+    profession_code TEXT NOT NULL DEFAULT '',
+    track_code TEXT NOT NULL DEFAULT '',
+    runtime_code TEXT NOT NULL DEFAULT '',
+    room_profile_code TEXT NOT NULL DEFAULT '',
     bio TEXT NOT NULL DEFAULT '',
     avatar_url TEXT NOT NULL DEFAULT '',
     linkedin_url TEXT NOT NULL DEFAULT '',
@@ -25,6 +29,10 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 );
 
 ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS linkedin_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS profession_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS track_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS runtime_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS room_profile_code TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS refresh_sessions (
     token TEXT PRIMARY KEY,
@@ -91,6 +99,9 @@ CREATE TABLE IF NOT EXISTS challenge_templates (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     category TEXT NOT NULL,
     track TEXT NOT NULL,
+    profession_code TEXT NOT NULL DEFAULT 'developer',
+    track_code TEXT NOT NULL DEFAULT 'frontend',
+    runtime_code TEXT NOT NULL DEFAULT 'javascript',
     variation_strings_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     variation_numbers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     skill_weights_json JSONB NOT NULL DEFAULT '{}'::jsonb
@@ -113,6 +124,9 @@ CREATE TABLE IF NOT EXISTS challenge_variants (
 
 ALTER TABLE challenge_templates ADD COLUMN IF NOT EXISTS asset_directory TEXT NOT NULL DEFAULT '';
 ALTER TABLE challenge_templates ADD COLUMN IF NOT EXISTS editable_files_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE challenge_templates ADD COLUMN IF NOT EXISTS profession_code TEXT NOT NULL DEFAULT 'developer';
+ALTER TABLE challenge_templates ADD COLUMN IF NOT EXISTS track_code TEXT NOT NULL DEFAULT 'frontend';
+ALTER TABLE challenge_templates ADD COLUMN IF NOT EXISTS runtime_code TEXT NOT NULL DEFAULT 'javascript';
 ALTER TABLE challenge_variants ADD COLUMN IF NOT EXISTS visible_tests_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE challenge_variants ADD COLUMN IF NOT EXISTS editable_files_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 

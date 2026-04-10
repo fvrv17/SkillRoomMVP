@@ -137,6 +137,10 @@ paths:
               example:
                 user_id: usr_123
                 selected_track: react
+                profession_code: developer
+                track_code: frontend
+                runtime_code: javascript
+                room_profile_code: developer_default
                 linkedin_url: https://linkedin.com/in/candidate-one
                 current_skill_score: 612.4
                 percentile_global: 89
@@ -992,6 +996,14 @@ components:
           type: string
         selected_track:
           type: string
+        profession_code:
+          type: string
+        track_code:
+          type: string
+        runtime_code:
+          type: string
+        room_profile_code:
+          type: string
         linkedin_url:
           type: string
           format: uri
@@ -1040,6 +1052,12 @@ components:
         category:
           type: string
         track:
+          type: string
+        profession_code:
+          type: string
+        track_code:
+          type: string
+        runtime_code:
           type: string
         editable_files:
           type: array

@@ -961,6 +961,7 @@ func (a *App) register(ctx context.Context, req RegisterRequest) (AuthResponse, 
 		},
 	}
 	user.Profile.UserID = user.ID
+	user.Profile = normalizeUserProfileMetadata(user.Profile, user.Role)
 	a.users[user.ID] = user
 	a.emailIndex[email] = user.ID
 	a.initUserStateLocked(user.ID, now)
@@ -1212,7 +1213,7 @@ func (a *App) listTemplates(ctx context.Context, category string) ([]ChallengeTe
 		templates := make([]ChallengeTemplate, 0, len(a.templates))
 		for _, template := range a.templates {
 			if category == "" || template.Category == category {
-				templates = append(templates, template)
+				templates = append(templates, normalizeChallengeTemplateMetadata(template))
 			}
 		}
 		sort.Slice(templates, func(i, j int) bool {
@@ -1238,7 +1239,7 @@ func (a *App) listTemplatesLocked(category string) []ChallengeTemplate {
 	templates := make([]ChallengeTemplate, 0, len(a.templates))
 	for _, template := range a.templates {
 		if category == "" || template.Category == category {
-			templates = append(templates, template)
+			templates = append(templates, normalizeChallengeTemplateMetadata(template))
 		}
 	}
 	sort.Slice(templates, func(i, j int) bool {
@@ -1878,7 +1879,7 @@ func (a *App) profileViewLocked(userID string) UserProfile {
 	if !ok {
 		return UserProfile{}
 	}
-	profile := user.Profile
+	profile := normalizeUserProfileMetadata(user.Profile, user.Role)
 	confidence := a.confidenceAssessmentLocked(userID)
 	profile.ConfidenceScore = confidence.Score
 	profile.ConfidenceLevel = confidence.Level
@@ -1904,7 +1905,7 @@ func (a *App) updateProfile(ctx context.Context, userID string, req UpdateProfil
 	}
 
 	now := time.Now().UTC()
-	profile := user.Profile
+	profile := normalizeUserProfileMetadata(user.Profile, user.Role)
 	profile.LinkedInURL = linkedInURL
 	profile.UpdatedAt = now
 	user.Profile = profile

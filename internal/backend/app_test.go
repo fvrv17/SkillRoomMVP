@@ -113,6 +113,41 @@ func TestChallengeFlowUsesTelemetryAndServerEvaluation(t *testing.T) {
 	}
 }
 
+func TestRegisterUsesProfessionFoundationDefaults(t *testing.T) {
+	app := newTestApp()
+	router := app.Router()
+
+	token := registerAndLogin(t, router, RegisterRequest{
+		Email:    "foundation@example.com",
+		Username: "foundation",
+		Password: "password123",
+		Country:  "US",
+		Role:     RoleUser,
+	})
+
+	profileResp := performJSON(t, router, http.MethodGet, "/v1/profile", nil, token)
+	if profileResp.Code != http.StatusOK {
+		t.Fatalf("get profile: %d", profileResp.Code)
+	}
+
+	var profile UserProfile
+	if err := json.NewDecoder(profileResp.Body).Decode(&profile); err != nil {
+		t.Fatalf("decode profile: %v", err)
+	}
+	if profile.ProfessionCode != defaultProfessionCode {
+		t.Fatalf("expected profession_code %q, got %q", defaultProfessionCode, profile.ProfessionCode)
+	}
+	if profile.TrackCode != defaultDeveloperTrackCode {
+		t.Fatalf("expected track_code %q, got %q", defaultDeveloperTrackCode, profile.TrackCode)
+	}
+	if profile.RuntimeCode != defaultDeveloperRuntimeCode {
+		t.Fatalf("expected runtime_code %q, got %q", defaultDeveloperRuntimeCode, profile.RuntimeCode)
+	}
+	if profile.RoomProfileCode != defaultDeveloperRoomProfile {
+		t.Fatalf("expected room_profile_code %q, got %q", defaultDeveloperRoomProfile, profile.RoomProfileCode)
+	}
+}
+
 func TestTrophyCaseUsesAchievementState(t *testing.T) {
 	app := newTestApp()
 	router := app.Router()
