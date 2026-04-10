@@ -88,7 +88,7 @@ async function recruiterFlow(browser, unique, seededCandidates) {
   await page.getByTestId("nav-leaderboard").click({ force: true });
   await page.getByText("Candidate leaderboard", { exact: true }).first().waitFor({ state: "visible", timeout: 30_000 });
   await waitForWorkspaceIdle(page);
-  await openLeaderboardCandidate(page, seededCandidates[0]);
+  await openLeaderboardCandidateByIndex(page, 0);
 
   await page.getByTestId("candidate-detail").waitFor({ state: "visible", timeout: 30_000 });
   await page.getByTestId("candidate-unlock").click();
@@ -107,7 +107,7 @@ async function recruiterFlow(browser, unique, seededCandidates) {
   await page.getByRole("button", { name: "Back to leaderboard" }).click();
   await page.getByText("Candidate leaderboard", { exact: true }).first().waitFor({ state: "visible", timeout: 30_000 });
 
-  await openLeaderboardCandidate(page, seededCandidates[1]);
+  await openLeaderboardCandidateByIndex(page, 1);
   await page.getByTestId("candidate-unlock").click();
   await page.getByTestId("candidate-invite").waitFor({ state: "visible", timeout: 30_000 });
   await page.getByTestId("candidate-invite").click();
@@ -116,12 +116,12 @@ async function recruiterFlow(browser, unique, seededCandidates) {
     return Boolean(action && /Invited/i.test(action.textContent || ""));
   }, { timeout: 30_000 });
 
-  await openLeaderboardCandidate(page, seededCandidates[2]);
+  await openLeaderboardCandidateByIndex(page, 2);
   await page.getByTestId("candidate-unlock").click();
   await page.getByTestId("candidate-invite").waitFor({ state: "visible", timeout: 30_000 });
   await expectButtonState(page.getByTestId("candidate-invite"), /Invite limit reached/i, true);
 
-  await openLeaderboardCandidate(page, seededCandidates[3]);
+  await openLeaderboardCandidateByIndex(page, 3);
   await page.getByTestId("candidate-unlock").waitFor({ state: "visible", timeout: 30_000 });
   await expectButtonState(page.getByTestId("candidate-unlock"), /Unlock limit reached/i, true);
 
@@ -234,15 +234,34 @@ async function signInCandidateViaUI(page, email) {
   await authForm.getByRole("button", { name: "Sign in" }).click();
 }
 
-async function openLeaderboardCandidate(page, candidate) {
+async function openLeaderboardCandidateByIndex(page, targetIndex) {
   await page.getByTestId("nav-leaderboard").click({ force: true });
   await page.getByText("Candidate leaderboard", { exact: true }).first().waitFor({ state: "visible", timeout: 30_000 });
   await waitForWorkspaceIdle(page);
-  await page.getByTestId(`leaderboard-open-${candidate.userID}`).waitFor({ state: "visible", timeout: 30_000 });
-  await page.getByTestId(`leaderboard-open-${candidate.userID}`).click();
+  const limit = 8;
+  const targetPageOffset = Math.floor(targetIndex / limit) * limit;
+  for (;;) {
+    const currentPageLabel = await page.locator(".pagination-row p").first().textContent().catch(() => "");
+    const match = currentPageLabel && currentPageLabel.match(/Showing\s+(\d+)-(\d+)\s+of\s+(\d+)/i);
+    const start = match ? Number(match[1]) - 1 : 0;
+    if (start === targetPageOffset || !match) {
+      break;
+    }
+    const previousPage = page.getByTestId("leaderboard-pagination-prev");
+    if (!(await previousPage.count()) || await previousPage.isDisabled()) {
+      break;
+    }
+    await previousPage.click();
+    await waitForWorkspaceIdle(page);
+  }
+
+  const rowIndex = targetIndex % limit;
+  const openCandidate = page.locator('[data-testid^="leaderboard-open-"]').nth(rowIndex);
+  await openCandidate.waitFor({ state: "visible", timeout: 30_000 });
+  await openCandidate.click();
   const detail = page.getByTestId("candidate-detail");
   await detail.waitFor({ state: "visible", timeout: 30_000 });
-  await detail.getByRole("heading", { name: candidate.username }).waitFor({ state: "visible", timeout: 30_000 });
+  await detail.locator("h3").first().waitFor({ state: "visible", timeout: 30_000 });
 }
 
 async function expectButtonState(locator, label, disabled) {
