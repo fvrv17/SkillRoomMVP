@@ -6,6 +6,13 @@ It combines real code execution, deterministic challenge variants, explainable s
 
 **Can we evaluate technical ability in a way that feels fair to candidates and useful to recruiters?**
 
+## TL;DR
+
+- skill-based hiring platform with real code execution
+- anti-cheat evaluation system
+- scalable backend built on Go, PostgreSQL, Redis, and isolated Docker execution
+- designed for production, not demo
+
 The name is intentional:
 - **Fair**: scores come from real execution, not quizzes or keyword filters
 - **Square**: the room metaphor gives the product a concrete visual space instead of a generic dashboard
@@ -97,6 +104,17 @@ Square and Fair is built around inspectable trust.
 - recruiter access is gated by backend-enforced unlocks and plan rules
 - developer cosmetics do not affect score, confidence, or ranking
 
+## Anti-Cheat Design
+
+The system is designed to make answer sharing and shortcut-based progress unreliable.
+
+- deterministic per-user challenge variants
+- dynamic input generation
+- isolated execution with no shared state
+- server-side scoring and validation
+
+That keeps challenge outcomes tied to actual execution and forces real skill demonstration instead of copy-paste success.
+
 ## Security Posture
 
 Key implementation choices already in the repo:
@@ -118,6 +136,15 @@ The main remaining infrastructure caveat is the runner boundary: the proxy sidec
 - **Recruiter Surface**: leaderboard, candidate preview, unlock, invite
 - **Monetization Layer**: plans, entitlements, quotas, cosmetic inventory
 - **Future Expansion Layer**: profession, track, runtime, and room profile metadata
+
+## Engineering Challenges
+
+Key engineering challenges solved in this project:
+
+- safe execution of untrusted user code
+- preventing cheating without harming UX
+- designing deterministic but varied challenge generation
+- building a scoring system that is both fair and explainable
 
 ## Current Product Scope
 
@@ -157,6 +184,21 @@ Developer monetization stays intentionally lightweight:
 - visual customization
 - no pay-to-win mechanics
 - no score manipulation through purchases
+
+## Scalability
+
+The system is designed to scale beyond a small demo deployment.
+
+Current scale posture:
+- stateless API layer for horizontal scaling
+- isolated runner execution per request
+- async-ready evaluation flow
+- PostgreSQL and Redis split by durability and hot operational traffic
+
+Future scaling path:
+- message queues such as Kafka or RabbitMQ
+- distributed worker pools
+- multi-region runner isolation
 
 ## Repository Structure
 
@@ -224,4 +266,3 @@ This repository is in strong beta shape:
 The current recommendation is:
 - **Go** for soft launch / controlled beta
 - **Cautious Go** for broader public rollout, with further runner isolation work
-
