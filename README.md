@@ -1,75 +1,227 @@
-# SkillRoom MVP
+# Square and Fair
 
-SkillRoom is a production-oriented MVP for evaluating React skills through real code execution. The system uses:
+Square and Fair is a skill evaluation platform for developers and recruiters.
 
-- a Go modular monolith for product logic and APIs
-- a separate runner service for isolated challenge execution
-- a restricted Docker API proxy between the runner and the host socket
-- PostgreSQL for system-of-record data
-- Redis for cache, rate limiting, and hot operational state
-- Next.js for the browser client
+It combines real code execution, deterministic challenge variants, explainable scoring, and a visual room that reflects actual skill signals. The product is designed to answer a simple question well:
 
-## Current guarantees
+**Can we evaluate technical ability in a way that feels fair to candidates and useful to recruiters?**
 
-- challenge correctness comes from real test execution in the runner
-- scoring is computed in `internal/evaluation` from execution output
-- quality score combines lint output and task-specific quality checks from real test results
-- runtime efficiency is exposed as `execution_cost_score` and is based on execution cost normalized per challenge, not candidate solve speed
-- challenge variants are deterministic per user/template/attempt seed
-- challenge bank includes 12+ real React and JavaScript templates with visible and hidden tests
-- room items reflect stored skill data
-- confidence and HR views include explanation data, not just raw numbers
-- monetization foundation is wired into the backend via plans, subscriptions, AI usage metering, and developer cosmetic inventory
+The name is intentional:
+- **Fair**: scores come from real execution, not quizzes or keyword filters
+- **Square**: the room metaphor gives the product a concrete visual space instead of a generic dashboard
 
-## Main entrypoints
+## What the product does
 
-- `cmd/backend`: main API server
-- `cmd/runner-service`: isolated execution service
-- `cmd/devstack`: local two-process Go bootstrap
+For developers:
+- solve real coding challenges
+- get score, confidence, explanations, and a living skill room
+- keep progression visual without turning the system into pay-to-win
 
-## Main docs
+For recruiters:
+- browse ranked candidate signals
+- unlock full candidate profiles
+- inspect room state, challenge history, and linked evidence
+- invite candidates through a gated, server-enforced workflow
 
-- `docs/architecture.md`
-- `docs/backend-agent.md`
-- `docs/data-agent.md`
-- `docs/ai-agent.md`
-- `docs/frontend-agent.md`
-- `docs/devops-agent.md`
-- `api/openapi.yaml`
+## Why this repo matters
 
-## Monetization foundation
+This repository is not a static landing page or a thin demo.
 
-The current MVP ships the monetization architecture layer without billing integration:
+It already contains:
+- a production-oriented Go backend
+- isolated challenge execution through a dedicated runner
+- recruiter and candidate workflows
+- server-enforced monetization foundations
+- SQL-backed ranking and candidate discovery
+- browser smoke coverage for trust-critical flows
+- a foundation for future professions, tracks, and runtimes
 
-- default role-based plans for developers and recruiters
-- persisted subscriptions and entitlement snapshots
-- AI usage metering for developer hints/explanations and HR-side AI actions
-- developer cosmetic catalog, ownership, equipped state, and plan-gated room customization
+## Architecture & Design
 
-HR candidate unlock flow is active. Billing and paid developer cosmetic purchases are intentionally deferred to later product sprints.
+This project is designed as a scalable backend system, not just an MVP.
 
-## Local stack
+Key decisions:
+- modular service structure for future scaling
+- separation of API and processing logic
+- async-ready design for handling evaluation workflows
+- isolated execution for untrusted code
+- explainable scoring instead of opaque ranking
+- product trust enforced in the backend, not delegated to UI
+
+Today the runtime shape is a modular monolith plus a separate runner, because that gives the best tradeoff between speed of iteration and operational clarity. The codebase is intentionally structured so execution, monetization, ranking, and future profession expansion can evolve without rewriting the core product.
+
+## System Architecture
+
+```mermaid
+flowchart LR
+    browser["Next.js frontend"] --> backend["Go backend API"]
+    backend --> postgres["PostgreSQL"]
+    backend --> redis["Redis"]
+    backend --> runner["Runner service"]
+    runner --> proxy["Restricted Docker API proxy"]
+    proxy --> sandbox["Ephemeral sandbox container"]
+    backend --> ai["AI services (optional)"]
+```
+
+## Evaluation Flow
+
+```mermaid
+sequenceDiagram
+    participant U as Candidate
+    participant F as Frontend
+    participant B as Backend
+    participant R as Runner
+    participant S as Sandbox
+
+    U->>F: Start challenge
+    F->>B: Create challenge instance
+    B->>B: Build deterministic variant
+    U->>F: Edit allowed files
+    F->>B: Run / Submit
+    B->>R: Send workspace + tests + limits
+    R->>S: Execute in isolated container
+    S-->>R: Raw results
+    R-->>B: Structured execution output
+    B->>B: Score, confidence, skills, rankings, room state
+    B-->>F: Updated candidate state
+```
+
+## Product Trust Model
+
+Square and Fair is built around inspectable trust.
+
+- correctness comes from real tests
+- challenge variants are deterministic per user and attempt
+- scoring is computed in one shared evaluation layer
+- room items reflect stored skill state, not cosmetic inflation
+- recruiter access is gated by backend-enforced unlocks and plan rules
+- developer cosmetics do not affect score, confidence, or ranking
+
+## Security Posture
+
+Key implementation choices already in the repo:
+- cookie-based auth flow
+- refresh token removed from JSON responses
+- trusted proxy handling for forwarded headers
+- rate limiting and operational counters in the backend
+- non-root sandbox execution
+- restricted Docker proxy between runner and host Docker control plane
+- browser smoke tests for candidate and recruiter trust loops
+
+The main remaining infrastructure caveat is the runner boundary: the proxy sidecar is still host-coupled. For a controlled beta this is acceptable. For a larger public rollout, execution should move to a more isolated worker topology.
+
+## Core Platform Areas
+
+- **Challenge Engine**: deterministic variants, execution lifecycle, scoring pipeline
+- **Runner**: isolated code execution with bounded CPU, memory, and timeout
+- **Skill Graph**: score, confidence, progression, and room mapping
+- **Recruiter Surface**: leaderboard, candidate preview, unlock, invite
+- **Monetization Layer**: plans, entitlements, quotas, cosmetic inventory
+- **Future Expansion Layer**: profession, track, runtime, and room profile metadata
+
+## Current Product Scope
+
+Current primary profession:
+- `developer`
+
+Current default track:
+- `frontend`
+
+Current default runtime:
+- `javascript`
+
+Foundation is already laid for future developer/backend runtimes:
+- `go`
+- `java`
+- `python`
+- `rust`
+- `javascript`
+- `cpp`
+- `csharp`
+- `swift`
+- `php`
+- `kotlin`
+
+That foundation is additive and backward-compatible. It does not compromise the current production path.
+
+## Monetization Design
+
+Recruiter monetization is the main revenue model:
+- candidate preview is limited
+- full profile access is unlocked server-side
+- invites are quota-gated by plan
+- HR AI actions are metered in the backend
+
+Developer monetization stays intentionally lightweight:
+- room cosmetics
+- visual customization
+- no pay-to-win mechanics
+- no score manipulation through purchases
+
+## Repository Structure
+
+- [cmd/backend](/Users/fvrv17/Desktop/MVP/cmd/backend): API server
+- [cmd/runner-service](/Users/fvrv17/Desktop/MVP/cmd/runner-service): execution service
+- [cmd/runner-docker-proxy](/Users/fvrv17/Desktop/MVP/cmd/runner-docker-proxy): restricted Docker proxy
+- [frontend](/Users/fvrv17/Desktop/MVP/frontend): Next.js application
+- [internal/backend](/Users/fvrv17/Desktop/MVP/internal/backend): product logic
+- [internal/evaluation](/Users/fvrv17/Desktop/MVP/internal/evaluation): scoring source of truth
+- [internal/runner](/Users/fvrv17/Desktop/MVP/internal/runner): runner engine
+- [internal/runnerproxy](/Users/fvrv17/Desktop/MVP/internal/runnerproxy): Docker proxy validation layer
+- [api/openapi.yaml](/Users/fvrv17/Desktop/MVP/api/openapi.yaml): API contract
+- [docs/architecture.md](/Users/fvrv17/Desktop/MVP/docs/architecture.md): deeper system notes
+
+## Local Development
+
+Run the full stack:
 
 ```bash
 docker compose -f deploy/docker-compose.yml up --build
 ```
 
-Open `http://localhost:3000` for the Next.js frontend.
-The backend root route only redirects to the frontend when `FRONTEND_REDIRECT_URL` is set.
-The runner no longer mounts the host Docker socket directly; sandbox execution is brokered through an internal Docker API proxy.
+Then open:
+- frontend: `http://localhost:3000`
+- backend readiness: `http://localhost:8080/readyz`
 
-For a backend-only local boot without PostgreSQL or Redis, set `ALLOW_INSECURE_BOOT=true`. The default startup path now expects the full production-oriented stack.
+The default startup path expects the full production-oriented stack: frontend, backend, runner, PostgreSQL, and Redis.
 
-## Testing
+## Verification
+
+Core checks:
 
 ```bash
 go test ./...
-node --check frontend/lib/client.js
-node --check frontend/app/workspace/workspace-client.js
+npm --prefix frontend run test:e2e
 ```
 
-Docker-backed end-to-end runner verification is available with:
+Docker-backed runner verification:
 
 ```bash
 go test ./internal/backend -run TestRealRunnerEndToEnd -count=1
 ```
+
+## Design Direction
+
+Square and Fair is being built to support more than one profession over time.
+
+The codebase now includes foundation metadata for:
+- profession
+- track
+- runtime
+- room profile
+
+That makes it possible to expand from developers into adjacent professional tracks later without breaking the current system design.
+
+## Status
+
+This repository is in strong beta shape:
+- real execution path
+- real recruiter flow
+- real monetization enforcement
+- audited frontend and runner runtime dependencies
+- browser smoke coverage for core trust paths
+
+The current recommendation is:
+- **Go** for soft launch / controlled beta
+- **Cautious Go** for broader public rollout, with further runner isolation work
+
