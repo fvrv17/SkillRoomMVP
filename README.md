@@ -13,6 +13,24 @@ It combines real code execution, deterministic challenge variants, explainable s
 - scalable backend built on Go, PostgreSQL, Redis, and isolated Docker execution
 - designed for production, not demo
 
+## Product Preview
+
+### Launch
+
+![Square and Fair landing](docs/images/square-and-fair-landing.png)
+
+### Developer Overview
+
+![Square and Fair developer overview](docs/images/square-and-fair-developer-overview.png)
+
+### Developer Room
+
+![Square and Fair developer room](docs/images/square-and-fair-developer-room.png)
+
+### Recruiter Candidate View
+
+![Square and Fair recruiter candidate detail](docs/images/square-and-fair-hr-candidate-detail.png)
+
 The name is intentional:
 - **Fair**: scores come from real execution, not quizzes or keyword filters
 - **Square**: the room metaphor gives the product a concrete visual space instead of a generic dashboard
