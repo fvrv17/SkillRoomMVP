@@ -1,17 +1,27 @@
 # Square and Fair
 
-Square and Fair is a skill evaluation platform for developers and recruiters.
+Square and Fair is an API-ready skill validation engine for hiring platforms.
 
-It combines real code execution, deterministic challenge variants, explainable scoring, and a visual room that reflects actual skill signals. The product is designed to answer a simple question well:
+It combines real code execution, deterministic challenge variants, explainable scoring, and a visual room that reflects actual skill signals. The product is designed to answer a harder question than a normal hiring dashboard:
 
-**Can we evaluate technical ability in a way that feels fair to candidates and useful to recruiters?**
+**Can technical skill be validated in a way that is fair to candidates, useful to recruiters, and easy for platforms to integrate?**
 
 ## TL;DR
 
-- skill-based hiring platform with real code execution
-- anti-cheat evaluation system
-- scalable backend built on Go, PostgreSQL, Redis, and isolated Docker execution
-- designed for production, not demo
+- API-ready skill validation engine for hiring platforms
+- real code execution instead of quizzes or CV filtering
+- anti-cheat system with deterministic challenge variants
+- production-ready backend built on Go, PostgreSQL, Redis, and an isolated Docker runner
+- designed for integration, not as a standalone demo
+
+Square and Fair is not just a hiring platform.
+
+It is a **drop-in candidate validation system** that can be integrated into existing hiring marketplaces, talent networks, or ATS products.
+
+Instead of building evaluation infrastructure internally, platforms can plug this system in and immediately:
+- validate real technical skills
+- reduce screening cost
+- increase candidate quality
 
 ## Product Preview
 
@@ -34,6 +44,27 @@ It combines real code execution, deterministic challenge variants, explainable s
 The name is intentional:
 - **Fair**: scores come from real execution, not quizzes or keyword filters
 - **Square**: the room metaphor gives the product a concrete visual space instead of a generic dashboard
+
+## Business Impact
+
+The system is designed to:
+
+- reduce cost per hire by pre-validating candidates
+- increase recruiter efficiency through structured signals
+- improve candidate engagement via gamified progression
+- differentiate hiring platforms beyond CV-based matching
+
+Expected impact comes from a combination of behavioral engagement mechanics and real skill validation, not from generic profile enrichment.
+
+## Integration Model
+
+The system can be integrated as:
+
+- an API-based evaluation service
+- an internal module inside hiring platforms
+- a white-label validation layer for ATS products
+
+That is why the backend, execution layer, scoring pipeline, and recruiter workflows are structured as reusable platform components rather than a thin standalone app.
 
 ## What the product does
 
